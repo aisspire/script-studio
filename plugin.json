@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 2,
+  "id": "script-studio",
+  "name": "Script Studio",
+  "version": "0.1.0",
+  "icon": "terminal",
+  "documentation": "USER_GUIDE.md",
+  "capabilities": ["web-page", "local-service-v1"],
+  "lifecycle": { "protocol": "stdio-v1", "entrypoint": "oriel.ps1", "args": [] },
+  "entries": [{ "id": "workspace", "title": "Script Studio", "kind": "web-page", "presentation": "application", "service": "script-studio", "proxy": { "mode": "direct" } }]
+}

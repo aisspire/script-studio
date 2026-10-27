@@ -24,6 +24,7 @@ pub async fn action(rt: &Arc<Runtime>, value: Value) -> Result<Value> {
             value["revision"].as_str().ok_or("缺少配置修订版本。")?,
         ),
         "run.start" => rt.start(value["scriptId"].as_str().ok_or("缺少脚本 ID。")?),
+        "run.terminal" => rt.open_terminal(value["scriptId"].as_str().ok_or("缺少脚本 ID。")?),
         "run.stop" => rt.stop(value["runId"].as_str().ok_or("缺少运行 ID。")?),
         "run.logs" => rt.logs(
             value["runId"].as_str().ok_or("缺少运行 ID。")?,

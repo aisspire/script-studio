@@ -107,6 +107,43 @@ try{
   await cdp.evaluate(`(()=>{const el=document.querySelector('[aria-label="搜索脚本"]');el.value='no-match';el.dispatchEvent(new Event('input',{bubbles:true}))})()`);assert.match(await text(),/没有匹配的脚本/)
   await cdp.evaluate(`(()=>{const el=document.querySelector('[aria-label="搜索脚本"]');el.value='';el.dispatchEvent(new Event('input',{bubbles:true}))})()`)
  })
+ await check('Ctrl launch mode, tooltip, keyboard reset, reduced motion and preserved copy action',async()=>{
+  const control=async(type)=>cdp.command('Input.dispatchKeyEvent',{type,key:'Control',code:'ControlLeft',windowsVirtualKeyCode:17,modifiers:type==='keyDown'?2:0})
+  const selector='.run-button:not(.stop)'
+  assert.match(await cdp.evaluate(`document.querySelector('${selector}').title`),/按住 Ctrl/)
+  await control('keyDown')
+  assert.equal(await cdp.evaluate(`document.querySelector('${selector}').classList.contains('external-launch')`),true)
+  assert.match(await cdp.evaluate(`document.querySelector('${selector}').title`),/外部 PowerShell/)
+  assert.equal(await cdp.evaluate(`getComputedStyle(document.querySelector('${selector}'),'::after').animationName`),'terminal-pulse')
+  await shot('ctrl-terminal-light.png')
+  await cdp.command('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'dark'},{name:'prefers-reduced-motion',value:'reduce'}]})
+  assert.equal(await cdp.evaluate(`getComputedStyle(document.querySelector('${selector}'),'::after').animationName`),'none')
+  await shot('ctrl-terminal-dark-reduced.png')
+  await cdp.command('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]})
+  await control('keyUp')
+  assert.equal(await cdp.evaluate(`document.querySelector('${selector}').classList.contains('external-launch')`),false)
+  await control('keyDown');await cdp.evaluate(`window.dispatchEvent(new Event('blur'))`)
+  assert.equal(await cdp.evaluate(`document.querySelector('${selector}').classList.contains('external-launch')`),false)
+  await control('keyUp')
+  await cdp.evaluate(`window.terminalOriginalFetch=window.fetch;window.terminalRequests=[];window.fetch=(url,options)=>{const request=options?.body&&JSON.parse(options.body);if(request?.action==='run.terminal'){window.terminalRequests.push(request);return Promise.resolve(new Response(JSON.stringify({ok:true,value:{opened:true}})))}return window.terminalOriginalFetch(url,options)}`)
+  try{
+   const runs=(await app.api('snapshot')).runs
+   await cdp.evaluate(`document.querySelector('${selector}').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}))`)
+   await until(()=>cdp.evaluate(`document.querySelector('.toast-success')?.textContent.includes('已打开外部终端')`),'external launch notice')
+   assert.equal(await cdp.evaluate(`window.terminalRequests.length`),1)
+   assert.equal(await cdp.evaluate(`window.terminalRequests[0].scriptId`),(await app.api('snapshot')).config.scripts[0].id)
+   assert.deepEqual((await app.api('snapshot')).runs,runs)
+   await control('keyDown');await aria('复制 界面任务 的 PowerShell 命令');await control('keyUp')
+   assert.equal(await cdp.evaluate(`window.terminalRequests.length`),1,'Ctrl does not change the copy action')
+   assert.match(await cdp.evaluate('navigator.clipboard.readText()'),/a b 中文/)
+   await fill('名称','未保存的终端草稿')
+   await cdp.evaluate(`document.querySelector('${selector}').dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}))`)
+   await until(()=>cdp.evaluate(`document.querySelector('.confirm-dialog').open`),'draft confirmation')
+   await control('keyUp');await click('确认','.confirm-dialog')
+   await until(()=>cdp.evaluate(`window.terminalRequests.length===2`),'captured Ctrl survives draft confirmation')
+   assert.equal((await app.api('snapshot')).config.scripts[0].name,'界面任务')
+  }finally{await cdp.evaluate(`window.fetch=window.terminalOriginalFetch;delete window.terminalOriginalFetch;delete window.terminalRequests`);await control('keyUp')}
+ })
  let firstRun
  await check('script run, stdout/stderr, terminal state and history selection are real',async()=>{
   await aria('运行 界面任务');firstRun=await until(async()=>(await app.api('snapshot')).runs[0]?.id,'run ID');await completed(app,firstRun);await until(()=>cdp.evaluate(`document.querySelector('.output-body').textContent.includes('ui-result:')`),'real output');assert.match(await cdp.evaluate(`document.querySelector('.output-body').textContent`),/a b 中文/);assert.match(await cdp.evaluate(`document.querySelector('.output-body').textContent`),/ui diagnostic/)

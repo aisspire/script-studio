@@ -135,6 +135,30 @@ impl Runtime {
         }
         Ok(json!({"runId":run_id}))
     }
+    pub fn open_terminal(&self, script_id: &str) -> Result<Value> {
+        let s = self.state.lock().unwrap();
+        if s.closing {
+            return Err("后台正在退出。".into());
+        }
+        if s.store.error.is_some() {
+            return Err("请先修复配置并重新加载，再运行脚本。".into());
+        }
+        if s.runs
+            .iter()
+            .any(|r| r.script_id == script_id && r.state.active())
+        {
+            return Err("此脚本已经在运行。".into());
+        }
+        let script = s
+            .store
+            .config
+            .scripts
+            .iter()
+            .find(|x| x.id == script_id)
+            .ok_or("脚本不存在，请重新加载。")?;
+        crate::terminal::open(script)?;
+        Ok(json!({"opened":true}))
+    }
     pub fn stop(&self, run_id: &str) -> Result<Value> {
         let mut s = self.state.lock().unwrap();
         if let Some(cancel) = s.active.get(run_id) {

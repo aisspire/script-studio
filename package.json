@@ -10,6 +10,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "test:runtime": "node scripts/check-runtime.mjs",
     "test:commands": "node scripts/check-commands.mjs",
+    "test:terminal": "node scripts/check-terminal.mjs",
     "test:ui": "node scripts/check-ui.mjs",
     "test:bundle": "node scripts/check-bundle.mjs"
   },

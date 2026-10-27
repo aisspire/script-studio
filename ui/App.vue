@@ -12,6 +12,8 @@ const envText = ref(''), envBase = ref(''), envError = ref('')
 const busy = ref(false), loading = ref(true), error = ref(''), notice = ref(''), offline = ref(false), exited = ref(false)
 const connectionError = ref('')
 const sidebarOpen = ref(false), configOpen = ref(false), outputCollapsed = ref(false)
+const ctrlHeld = ref(false)
+const launchHint = computed(() => ctrlHeld.value ? '在外部 PowerShell 终端运行（使用已保存配置）' : '运行脚本 · 按住 Ctrl 点击可在外部终端运行')
 const outputId = ref(''), chunks = ref<Chunk[]>([]), cursor = ref(0), clipped = ref(false), follow = ref(true)
 const logLoaded = ref(false), outputCleared = ref(false)
 const outputBody = ref<HTMLElement>(), addDialog = ref<HTMLDialogElement>(), groupsDialog = ref<HTMLDialogElement>(), settingsDialog = ref<HTMLDialogElement>(), helpDialog = ref<HTMLDialogElement>(), confirmDialog = ref<HTMLDialogElement>()
@@ -93,9 +95,21 @@ function saveGroups() { void perform(async () => {
   config.scripts.forEach(s => { if (!config.groups.some(g => g.id === s.groupId)) s.groupId = null })
   await saveConfig(config); resetDraft(); groupsDialog.value?.close(); notice.value = '分组已保存'
 }) }
-function runScript(script: Script) {
-  guard(() => void perform(async () => { selected.value = script.id; outputCollapsed.value = false; const result = await api<{ runId: string }>('run.start', { scriptId: script.id }); await refresh(); outputId.value = result.runId }))
+function runScript(script: Script, event: MouseEvent) {
+  // Capture the modifier before a draft confirmation or asynchronous work.
+  const external = event.ctrlKey || ctrlHeld.value
+  guard(() => void perform(async () => {
+    if (external) {
+      await api('run.terminal', { scriptId: script.id })
+      notice.value = '已打开外部终端，运行与停止请在终端中操作'
+      return
+    }
+    selected.value = script.id; outputCollapsed.value = false; const result = await api<{ runId: string }>('run.start', { scriptId: script.id }); await refresh(); outputId.value = result.runId
+  }))
 }
+function syncControl(event: KeyboardEvent | MouseEvent) { ctrlHeld.value = event.ctrlKey }
+function resetControl() { ctrlHeld.value = false }
+function visibilityChanged() { if (document.hidden) resetControl() }
 function stopRun(run: Run) { void perform(async () => { await api('run.stop', { runId: run.id }); await refresh() }) }
 async function poll() {
   if (disposed || exited.value) return
@@ -152,8 +166,18 @@ function outside(event: MouseEvent) { const el = event.currentTarget as HTMLElem
 function markBackdrop(event: PointerEvent) { if (event.currentTarget) backdrop.set(event.currentTarget, outside(event)) }
 function dismissBackdrop(event: MouseEvent) { if (event.currentTarget && backdrop.get(event.currentTarget) && outside(event)) (event.currentTarget as HTMLDialogElement).close() }
 function beforeUnload(event: BeforeUnloadEvent) { if (dirty.value) { event.preventDefault(); event.returnValue = '' } }
-onMounted(() => { window.addEventListener('beforeunload', beforeUnload); window.addEventListener('keydown', escapePanel); void poll() })
-onBeforeUnmount(() => { disposed = true; clearTimeout(timer); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', escapePanel) })
+onMounted(() => {
+  window.addEventListener('beforeunload', beforeUnload); window.addEventListener('keydown', escapePanel)
+  window.addEventListener('keydown', syncControl); window.addEventListener('keyup', syncControl)
+  window.addEventListener('pointermove', syncControl); window.addEventListener('blur', resetControl)
+  document.addEventListener('visibilitychange', visibilityChanged); void poll()
+})
+onBeforeUnmount(() => {
+  disposed = true; clearTimeout(timer); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', escapePanel)
+  window.removeEventListener('keydown', syncControl); window.removeEventListener('keyup', syncControl)
+  window.removeEventListener('pointermove', syncControl); window.removeEventListener('blur', resetControl)
+  document.removeEventListener('visibilitychange', visibilityChanged)
+})
 </script>
 
 <template>
@@ -183,7 +207,7 @@ onBeforeUnmount(() => { disposed = true; clearTimeout(timer); window.removeEvent
           <div v-if="loading" class="empty">正在连接本地后台…</div>
           <article v-for="script in visible" :key="script.id" class="script-card" :class="{ 'is-selected': selected === script.id }">
             <button class="card-select" :aria-pressed="selected === script.id" @click="selectScript(script.id)"><strong>{{ script.name }}</strong><span class="filename" :title="script.path">{{ script.path.split(/[\\/]/).at(-1) }}</span><span v-if="script.description" class="description">{{ script.description }}</span></button>
-            <div class="card-actions"><button class="icon-button copy-command" :aria-label="`复制 ${script.name} 的 PowerShell 命令`" title="复制 PowerShell 命令" :disabled="busy || !powershellCommand(script)" @click="copyCommand(script)"><UiIcon name="copy" :size="16" /></button><button v-if="active(latest(script.id))" class="run-button stop" :disabled="busy || latest(script.id)?.state === 'stopping'" :aria-label="`停止 ${script.name}`" title="停止脚本" @click="stopRun(latest(script.id)!)"><UiIcon name="stop" :size="15" /></button><button v-else class="run-button" :disabled="!writable || busy" :aria-label="`运行 ${script.name}`" title="运行脚本" @click="runScript(script)"><UiIcon name="play" :size="16" /></button></div>
+            <div class="card-actions"><button class="icon-button copy-command" :aria-label="`复制 ${script.name} 的 PowerShell 命令`" title="复制 PowerShell 命令" :disabled="busy || !powershellCommand(script)" @click="copyCommand(script)"><UiIcon name="copy" :size="16" /></button><button v-if="active(latest(script.id))" class="run-button stop" :disabled="busy || latest(script.id)?.state === 'stopping'" :aria-label="`停止 ${script.name}`" title="停止脚本" @click="stopRun(latest(script.id)!)"><UiIcon name="stop" :size="15" /></button><button v-else class="run-button" :class="{ 'external-launch': ctrlHeld }" :disabled="!writable || busy" :aria-label="ctrlHeld ? `在外部终端运行 ${script.name}` : `运行 ${script.name}`" :title="launchHint" @click="runScript(script, $event)"><UiIcon :name="ctrlHeld ? 'terminal' : 'play'" :size="16" /></button></div>
             <div class="card-bottom"><span class="run-state" :class="latest(script.id)?.state || 'idle'"><i />{{ latest(script.id) ? states[latest(script.id)!.state] : '未运行' }}</span><span class="type-badge">{{ fileType(script) }}</span><button class="favorite icon-button" :class="{ on: script.favorite }" :aria-label="`${script.favorite ? '取消收藏' : '收藏'} ${script.name}`" :aria-pressed="script.favorite" :disabled="!writable || busy" @click="favorite(script)"><UiIcon name="star" :size="16" /></button></div>
           </article>
           <div v-if="!loading && !visible.length" class="empty"><UiIcon name="code" :size="32" /><strong>{{ scripts.length ? '没有匹配的脚本' : '添加你的第一个脚本' }}</strong><p>{{ scripts.length ? '调整搜索或筛选条件。' : '将常用脚本放在一处，随时运行。' }}</p><button v-if="!scripts.length" class="primary" :disabled="!writable || busy" @click="openAdd"><UiIcon name="plus" />添加脚本</button></div>

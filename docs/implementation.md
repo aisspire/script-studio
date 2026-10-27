@@ -24,6 +24,7 @@ runs 中每次运行独立存储 JSON 快照和 JSONL 输出。状态为 running
 | save | config、revision；原子保存后返回 snapshot |
 | file.pick | 后台打开一个 Windows 文件选择器，返回 path 或 null；退出取消辅助进程 |
 | run.start | scriptId；只运行已保存配置，返回 runId |
+| run.terminal | scriptId；Windows 外部 PowerShell 终端启动已保存配置，返回 opened，不创建托管记录 |
 | run.stop | runId；幂等停止本运行的进程树 |
 | run.logs | runId、cursor（JSONL 字节偏移）；返回 chunks、下一 cursor、truncated |
 | shutdown | 拒绝新运行、清理任务、持久化结果并退出 |
@@ -35,6 +36,10 @@ runs 中每次运行独立存储 JSON 快照和 JSONL 输出。状态为 running
 Windows 挂起启动，加入启用 KILL_ON_JOB_CLOSE 的 Job 后恢复，失败时取消启动。每个运行独立持有 Job 与进程句柄；根进程退出码和 Job 内存活进程分别判断。停止确认进程树清空后才移除活动登记，不根据持久化 PID、进程名或端口接管外部进程。
 
 CMD 的路径和参数通过专用环境值一次展开，禁用延迟展开，含双引号或换行参数明确拒绝。其他解释器使用结构化参数传递。PowerShell 执行策略参数仅作用于当前进程。
+
+外部终端使用 Windows 新控制台及独立标准句柄，不继承后台 stdio 管道，也不加入工具托管 Job。仅通过私有接口按脚本 ID 获取已保存快照；拒绝退出中、配置不可读、脚本不存在及同脚本托管运行活动状态。路径与 CMD 参数在打开前校验，解释器启动失败在外部终端显示。
+
+终端以 `-NoProfile -NoExit` 打开 PowerShell，调用本程序内部 `terminal-run` 入口。一次性环境值转交配置快照，执行器复用结构化参数与工作目录、环境变量规则，stdin/stdout/stderr 接入外部控制台；快照不透传给脚本，调用结束从终端移除。不创建临时脚本文件，不把用户路径或参数拼接进 PowerShell 表达式；仅程序自身路径使用 PowerShell 单引号转义。辅助入口返回脚本退出码，终端继续保留。外部任务不计入单实例托管、运行历史、日志或后台退出清理。
 
 ## Oriel stdio-v1
 

@@ -40,6 +40,7 @@ cargo build --locked
 npm run build
 npm run test:runtime
 npm run test:commands
+npm run test:terminal
 npm run test:ui
 npm run test:bundle
 ```
@@ -55,4 +56,6 @@ Windows 与 WSL 使用各自的 node_modules。共享工作区缺少 Linux 原�
 - [实现契约](docs/implementation.md)：存储、HTTP、stdio 及执行器。
 - [验证记录](verification.md)：本轮实际结果及缺口。
 
-首版面向 Windows；Linux 构建仅用于隔离验证共享逻辑，不作为跨平台交付承诺。脚本正文编辑、定时调度和交互终端留待后续需求。
+`test:terminal` 使用生成的隔离脚本验证外部终端的参数、工作目录、环境变量、控制台句柄及退出归属，结束后清理本次创建的测试进程。
+
+首版面向 Windows；Linux 构建仅用于隔离验证共享逻辑，不作为跨平台交付承诺。Ctrl 点击运行支持外部 PowerShell 终端；脚本正文编辑、定时调度和内嵌交互终端留待后续需求。

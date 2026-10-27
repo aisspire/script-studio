@@ -1,6 +1,7 @@
 use crate::model::*;
 use std::{
-    path::Path,
+    collections::BTreeMap,
+    path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     time::{Duration, Instant},
 };
@@ -25,7 +26,15 @@ pub fn effective_runner(s: &Script) -> Result<Runner> {
         _ => Err("此文件类型需要选择自定义解释器或直接执行。".into()),
     }
 }
-pub fn command(s: &Script) -> Result<Command> {
+pub struct Launch {
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: PathBuf,
+    pub env: BTreeMap<String, String>,
+    raw_tail: Option<String>,
+}
+
+pub fn launch(s: &Script) -> Result<Launch> {
     if !s.path.is_file() {
         return Err("脚本文件不存在或不是普通文件，请编辑路径。".into());
     }
@@ -37,70 +46,132 @@ pub fn command(s: &Script) -> Result<Command> {
         return Err("工作目录不存在。".into());
     }
     let runner = effective_runner(s)?;
-    let mut cmd = match runner {
-        Runner::Direct => Command::new(&s.path),
-        Runner::Powershell => {
-            let mut c = Command::new("powershell.exe");
-            c.args([
+    let path = s.path.to_string_lossy().into_owned();
+    let (program, mut args) = match runner {
+        Runner::Direct => (path.clone(), vec![]),
+        Runner::Powershell => (
+            "powershell.exe".into(),
+            [
                 "-NoProfile",
                 "-NonInteractive",
                 "-ExecutionPolicy",
                 "Bypass",
                 "-File",
-            ])
-            .arg(&s.path);
-            c
-        }
-        Runner::Python => {
-            let mut c = Command::new("python");
-            c.args(["-u"]).arg(&s.path);
-            c
-        }
-        Runner::Node => {
-            let mut c = Command::new("node");
-            c.arg(&s.path);
-            c
-        }
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .chain([path.clone()])
+            .collect(),
+        ),
+        Runner::Python => ("python".into(), vec!["-u".into(), path.clone()]),
+        Runner::Node => ("node".into(), vec![path.clone()]),
         Runner::Custom => {
-            let mut c = Command::new(&s.program);
-            c.args(&s.interpreter_args).arg(&s.path);
-            c
+            let mut args = s.interpreter_args.clone();
+            args.push(path.clone());
+            (s.program.clone(), args)
         }
-        Runner::Cmd => {
-            let mut c = Command::new("cmd.exe");
-            c.envs(&s.env).env("SCRIPT_STUDIO_CMD_PATH", &s.path);
-            let mut invocation = String::from("\"\"%SCRIPT_STUDIO_CMD_PATH%\"");
-            for (i, arg) in s.args.iter().enumerate() {
-                if arg.contains(['"', '\r', '\n']) {
-                    return Err("CMD 参数不支持双引号或换行，请使用 PowerShell 包装脚本。".into());
-                }
-                let key = format!("SCRIPT_STUDIO_CMD_ARG_{i}");
-                c.env(&key, arg);
-                invocation.push_str(&format!(" \"%{key}%\""));
-            }
-            invocation.push('"');
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                c.args(["/D", "/V:OFF", "/S", "/C"]).raw_arg(invocation);
-            }
-            #[cfg(not(windows))]
-            c.args(["/D", "/V:OFF", "/S", "/C"]).arg(invocation);
-            c.current_dir(cwd)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            return Ok(c);
-        }
+        Runner::Cmd => (path, vec![]),
         Runner::Auto => unreachable!(),
     };
-    cmd.args(&s.args)
-        .envs(&s.env)
-        .current_dir(cwd)
+    args.extend(s.args.iter().cloned());
+    let mut launch = Launch {
+        program,
+        args,
+        cwd: cwd.into(),
+        env: s.env.clone(),
+        raw_tail: None,
+    };
+    // Rust implicitly wraps batch programs too. Make this explicit so both
+    // managed runs and the PowerShell bootstrap use the same CMD grammar.
+    if runner == Runner::Cmd || is_batch(&launch.program) {
+        launch
+            .env
+            .insert("SCRIPT_STUDIO_CMD_PATH".into(), launch.program);
+        let mut invocation = String::from("\"\"%SCRIPT_STUDIO_CMD_PATH%\"");
+        for (i, arg) in launch.args.iter().enumerate() {
+            if arg.contains(['"', '\r', '\n']) {
+                return Err("CMD 参数不支持双引号或换行，请使用 PowerShell 包装脚本。".into());
+            }
+            let key = format!("SCRIPT_STUDIO_CMD_ARG_{i}");
+            launch.env.insert(key.clone(), arg.clone());
+            invocation.push_str(&format!(" \"%{key}%\""));
+        }
+        invocation.push('"');
+        launch.program = "cmd.exe".into();
+        launch.args = ["/D", "/V:OFF", "/S", "/C"].map(str::to_owned).into();
+        launch.raw_tail = Some(invocation);
+    }
+    Ok(launch)
+}
+
+fn is_batch(program: &str) -> bool {
+    Path::new(program)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
+}
+
+pub fn command(s: &Script) -> Result<Command> {
+    let launch = launch(s)?;
+    let mut cmd = Command::new(&launch.program);
+    cmd.args(&launch.args);
+    if let Some(tail) = &launch.raw_tail {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.raw_arg(tail);
+        }
+        #[cfg(not(windows))]
+        cmd.arg(tail);
+    }
+    cmd.envs(&launch.env)
+        .current_dir(&launch.cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     Ok(cmd)
+}
+
+impl Launch {
+    #[cfg(any(windows, test))]
+    pub fn native_arguments(&self) -> String {
+        let mut args = self
+            .args
+            .iter()
+            .map(|arg| native_argument(arg))
+            .collect::<Vec<_>>();
+        if let Some(tail) = &self.raw_tail {
+            args.push(tail.clone());
+        }
+        args.join(" ")
+    }
+}
+
+// Windows CRT quoting; CMD's raw /C tail deliberately bypasses this function.
+#[cfg(any(windows, test))]
+fn native_argument(value: &str) -> String {
+    if !value.is_empty() && !value.chars().any(|ch| ch.is_whitespace() || ch == '"') {
+        return value.to_owned();
+    }
+    let mut quoted = String::from("\"");
+    let mut slashes = 0;
+    for ch in value.chars() {
+        if ch == '\\' {
+            slashes += 1;
+            continue;
+        }
+        quoted.extend(std::iter::repeat_n(
+            '\\',
+            slashes * if ch == '"' { 2 } else { 1 },
+        ));
+        slashes = 0;
+        if ch == '"' {
+            quoted.push('\\');
+        }
+        quoted.push(ch);
+    }
+    quoted.extend(std::iter::repeat_n('\\', slashes * 2));
+    quoted.push('"');
+    quoted
 }
 
 pub struct Owned {
@@ -408,6 +479,55 @@ pub fn exit_code(status: Option<ExitStatus>) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_argv_escapes_empty_quotes_and_trailing_backslashes() {
+        for (input, expected) in [
+            ("", "\"\""),
+            ("a b", "\"a b\""),
+            ("a\"b", "\"a\\\"b\""),
+            ("slash\\\"quote", "\"slash\\\\\\\"quote\""),
+            ("C:\\space dir\\", "\"C:\\space dir\\\\\""),
+            ("中文 &|<>%!^'$()", "\"中文 &|<>%!^'$()\""),
+        ] {
+            assert_eq!(native_argument(input), expected);
+        }
+    }
+
+    #[test]
+    fn cmd_uses_single_environment_expansion_for_all_batch_entrypoints() {
+        let mut script = Script {
+            id: id(),
+            name: "CMD".into(),
+            description: String::new(),
+            path: std::env::current_exe().unwrap(),
+            group_id: None,
+            favorite: false,
+            runner: Runner::Cmd,
+            program: String::new(),
+            interpreter_args: vec![],
+            args: vec!["%PATH% & ! (literal)".into(), "".into()],
+            cwd: None,
+            env: BTreeMap::new(),
+            encoding: Encoding::Utf8,
+        };
+        let cmd = launch(&script).unwrap();
+        assert_eq!(cmd.program, "cmd.exe");
+        assert_eq!(cmd.env["SCRIPT_STUDIO_CMD_ARG_0"], "%PATH% & ! (literal)");
+        assert_eq!(cmd.native_arguments(), "/D /V:OFF /S /C \"\"%SCRIPT_STUDIO_CMD_PATH%\" \"%SCRIPT_STUDIO_CMD_ARG_0%\" \"%SCRIPT_STUDIO_CMD_ARG_1%\"\"");
+        script.runner = Runner::Custom;
+        script.program = "custom.CMD".into();
+        script.interpreter_args = vec!["prefix".into()];
+        let cmd = launch(&script).unwrap();
+        assert_eq!(cmd.env["SCRIPT_STUDIO_CMD_PATH"], "custom.CMD");
+        assert_eq!(cmd.env["SCRIPT_STUDIO_CMD_ARG_0"], "prefix");
+        assert_eq!(
+            cmd.env["SCRIPT_STUDIO_CMD_ARG_1"],
+            script.path.to_string_lossy()
+        );
+        script.args.push("bad\"argument".into());
+        assert!(launch(&script).is_err());
+    }
+
     #[test]
     fn utf8_decoder_keeps_partial_characters_and_replaces_invalid_bytes() {
         let mut d = Decoder::new(Encoding::Utf8);

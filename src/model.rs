@@ -169,7 +169,8 @@ impl Config {
             if s.env.len() > 64
                 || s.env.iter().any(|(k, v)| {
                     k.is_empty()
-                        || k.starts_with("SCRIPT_STUDIO_CMD_")
+                        || k.to_ascii_uppercase().starts_with("SCRIPT_STUDIO_CMD_")
+                        || k.eq_ignore_ascii_case("SCRIPT_STUDIO_TERMINAL_SNAPSHOT")
                         || k.bytes().enumerate().any(|(i, c)| {
                             !(c.is_ascii_alphabetic() || c == b'_' || i > 0 && c.is_ascii_digit())
                         })

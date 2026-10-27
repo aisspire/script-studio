@@ -46,7 +46,6 @@ async fn main() {
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("terminal-run") => std::process::exit(terminal::run()?),
         Some("serve") => serve(directory(&args)?, &args).await,
         Some("request") => {
             let desc = existing(&directory(&args)?).await?;

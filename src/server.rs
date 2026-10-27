@@ -18,6 +18,20 @@ pub async fn action(rt: &Arc<Runtime>, value: Value) -> Result<Value> {
             )
         }
         "snapshot" => Ok(rt.snapshot()),
+        "ui.layout" => {
+            let s = rt.state.lock().unwrap();
+            Ok(json!(s.store.ui_layout()?))
+        }
+        "ui.layout.save" => {
+            let layout: UiLayout =
+                serde_json::from_value(value["layout"].clone()).map_err(|e| e.to_string())?;
+            let s = rt.state.lock().unwrap();
+            if s.closing {
+                return Err("后台正在退出。".into());
+            }
+            s.store.save_ui_layout(&layout)?;
+            Ok(json!(layout))
+        }
         "reload" => Ok(rt.reload()),
         "save" => rt.save(
             serde_json::from_value(value["config"].clone()).map_err(|e| e.to_string())?,

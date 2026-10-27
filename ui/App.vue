@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import UiIcon from './UiIcon.vue'
 import ToastNotifications from './ToastNotifications.vue'
 import { powershellCommand } from './command'
+import { usePanelLayout } from './usePanelLayout'
 import { active, api, fileType, freshScript, runners, states, type Chunk, type Config, type Group, type Logs, type Run, type Script, type Snapshot } from './api'
 
 const data = ref<Snapshot | null>(null)
@@ -166,6 +167,9 @@ function outside(event: MouseEvent) { const el = event.currentTarget as HTMLElem
 function markBackdrop(event: PointerEvent) { if (event.currentTarget) backdrop.set(event.currentTarget, outside(event)) }
 function dismissBackdrop(event: MouseEvent) { if (event.currentTarget && backdrop.get(event.currentTarget) && outside(event)) (event.currentTarget as HTMLDialogElement).close() }
 function beforeUnload(event: BeforeUnloadEvent) { if (dirty.value) { event.preventDefault(); event.returnValue = '' } }
+
+const { studio, header, layout, ready: layoutReady, maximum: layoutMaximum, resizingPanel, startResize, resizeKey, reset: resetPanel } = usePanelLayout(message => { error.value = message })
+
 onMounted(() => {
   window.addEventListener('beforeunload', beforeUnload); window.addEventListener('keydown', escapePanel)
   window.addEventListener('keydown', syncControl); window.addEventListener('keyup', syncControl)
@@ -181,8 +185,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="studio">
-    <header class="app-header">
+  <div ref="studio" class="studio" :class="{ 'is-resizing': resizingPanel }" :style="{ '--sidebar-w': layout.sidebarWidth + 'px', '--config-w': layout.configWidth + 'px', '--output-h': (outputCollapsed ? 42 : layout.outputHeight) + 'px' }">
+    <header ref="header" class="app-header">
       <button class="icon-button mobile-menu" aria-label="展开分组" :aria-expanded="sidebarOpen" @click="sidebarOpen = !sidebarOpen"><UiIcon name="menu" /></button>
       <div class="brand"><UiIcon name="terminal" :size="23" /><strong>Script Studio</strong><span>本地脚本</span></div>
       <span class="connection" :class="{ offline }"><i />{{ exited ? '已退出' : offline ? '连接中断' : loading ? '正在连接' : `${running.length} 个运行中` }}</span>
@@ -192,7 +196,7 @@ onBeforeUnmount(() => {
       @close-notice="notice = ''" @close-error="error ? error = '' : connectionError = ''"
       @reload="perform(async () => { install(await api<Snapshot>('reload')); resetDraft() })" />
     <div class="workspace">
-      <aside class="sidebar" :class="{ open: sidebarOpen }" aria-label="脚本分类">
+      <aside id="script-categories" class="sidebar" :class="{ open: sidebarOpen }" aria-label="脚本分类">
         <div class="section-label">工作空间</div>
         <button class="nav-item" :class="{ selected: page === 'all' }" @click="page = 'all'; sidebarOpen = false"><UiIcon name="grid" />所有脚本<span>{{ scripts.length }}</span></button>
         <button class="nav-item" :class="{ selected: page === 'favorites' }" @click="page = 'favorites'; sidebarOpen = false"><UiIcon name="star" />收藏<span>{{ scripts.filter(s => s.favorite).length }}</span></button>
@@ -200,6 +204,11 @@ onBeforeUnmount(() => {
         <div class="group-list"><button v-for="group in data?.config.groups || []" :key="group.id" class="nav-item" :class="{ selected: page === group.id }" @click="page = group.id; sidebarOpen = false"><UiIcon name="folder" /><span class="group-name" :title="group.name">{{ group.name }}</span><span>{{ scripts.filter(s => s.groupId === group.id).length }}</span></button><button class="nav-item" :class="{ selected: page === 'ungrouped' }" @click="page = 'ungrouped'; sidebarOpen = false"><UiIcon name="folder" />未分组<span>{{ scripts.filter(s => !s.groupId).length }}</span></button></div>
         <div class="local-info"><i /><span>本地工作空间</span><button title="查看数据目录" @click="settingsDialog?.showModal()">配置与历史</button></div>
       </aside>
+      <div class="resize-handle-v resize-handle-sidebar" :class="{ 'is-resizing': resizingPanel === 'sidebar' }"
+        title="拖动或方向键调整分类栏宽度，双击或 Enter 复位" aria-label="调整分类栏宽度" role="separator"
+        :tabindex="layoutReady ? 0 : -1" :aria-disabled="!layoutReady" aria-controls="script-categories" aria-orientation="vertical"
+        :aria-valuenow="layout.sidebarWidth" :aria-valuemin="160" :aria-valuemax="layoutMaximum.sidebar"
+        @pointerdown="startResize('sidebar', $event)" @keydown="resizeKey('sidebar', $event)" @dblclick="resetPanel('sidebar')" />
       <main class="script-list">
         <div class="list-heading"><h1>{{ pageTitle }}<span>{{ visible.length }}</span></h1><select v-model="type" aria-label="筛选脚本类型"><option>全部类型</option><option v-for="item in types" :key="item">{{ item }}</option></select></div>
         <label class="search"><UiIcon name="search" :size="16" /><input v-model="query" aria-label="搜索脚本" placeholder="搜索名称、路径或备注…" type="search" /></label>
@@ -213,7 +222,12 @@ onBeforeUnmount(() => {
           <div v-if="!loading && !visible.length" class="empty"><UiIcon name="code" :size="32" /><strong>{{ scripts.length ? '没有匹配的脚本' : '添加你的第一个脚本' }}</strong><p>{{ scripts.length ? '调整搜索或筛选条件。' : '将常用脚本放在一处，随时运行。' }}</p><button v-if="!scripts.length" class="primary" :disabled="!writable || busy" @click="openAdd"><UiIcon name="plus" />添加脚本</button></div>
         </div>
       </main>
-      <aside class="config-panel" :class="{ open: configOpen }" aria-label="脚本配置">
+      <div class="resize-handle-v resize-handle-config" :class="{ 'is-resizing': resizingPanel === 'config' }"
+        title="拖动或方向键调整配置面板宽度，双击或 Enter 复位" aria-label="调整配置面板宽度" role="separator"
+        :tabindex="layoutReady ? 0 : -1" :aria-disabled="!layoutReady" aria-controls="script-config" aria-orientation="vertical"
+        :aria-valuenow="layout.configWidth" :aria-valuemin="260" :aria-valuemax="layoutMaximum.config"
+        @pointerdown="startResize('config', $event)" @keydown="resizeKey('config', $event)" @dblclick="resetPanel('config')" />
+      <aside id="script-config" class="config-panel" :class="{ open: configOpen }" aria-label="脚本配置">
         <div class="config-heading"><h2>脚本配置<span v-if="dirty" class="dirty-dot" title="尚未保存" /></h2><button class="icon-button config-close" aria-label="关闭脚本配置" @click="closeConfig"><UiIcon name="close" /></button></div>
         <form v-if="draft" class="config-form" @submit.prevent="saveScript">
           <fieldset :disabled="!writable || busy">
@@ -232,7 +246,12 @@ onBeforeUnmount(() => {
       </aside>
     </div>
     <button v-if="current" class="floating-config" @click="openConfig"><UiIcon name="settings" :size="16" />脚本配置<span v-if="dirty" class="dirty-dot" /></button>
-    <section class="output-panel" :class="{ collapsed: outputCollapsed }" aria-label="运行输出">
+    <section id="script-output" class="output-panel" :class="{ collapsed: outputCollapsed }" aria-label="运行输出">
+      <div v-if="!outputCollapsed" class="resize-handle-output" :class="{ 'is-resizing': resizingPanel === 'output' }"
+        title="拖动或方向键调整输出面板高度，双击或 Enter 复位" aria-label="调整输出面板高度" role="separator"
+        :tabindex="layoutReady ? 0 : -1" :aria-disabled="!layoutReady" aria-controls="script-output" aria-orientation="horizontal"
+        :aria-valuenow="layout.outputHeight" :aria-valuemin="110" :aria-valuemax="layoutMaximum.output"
+        @pointerdown="startResize('output', $event)" @keydown="resizeKey('output', $event)" @dblclick="resetPanel('output')" />
       <div class="output-heading"><UiIcon name="terminal" /><strong>运行输出</strong><select v-if="history.length" :value="outputRun?.id" aria-label="选择运行记录" @change="outputId = ($event.target as HTMLSelectElement).value"><option v-for="run in history" :key="run.id" :value="run.id">{{ run.snapshot.name }} · {{ date(run.startedAt) }} · {{ states[run.state] }}</option></select><span v-else class="muted">{{ current?.name || '尚未选择脚本' }}</span><div class="output-tools"><button v-if="outputRun && active(outputRun)" class="stop-action" :disabled="busy || outputRun.state === 'stopping'" @click="stopRun(outputRun)"><UiIcon name="stop" :size="14" />停止</button><button class="icon-button" aria-label="复制当前输出" title="复制当前输出" :disabled="!chunks.length || busy" @click="copyOutput"><UiIcon name="copy" :size="15" /></button><button class="icon-button" aria-label="重新读取输出" title="从历史重新读取当前输出" :disabled="!outputRun" @click="reloadOutput"><UiIcon name="refresh" :size="15" /></button><button class="icon-button" aria-label="清空当前输出" title="清空当前显示，保留历史" @click="clearOutput"><UiIcon name="trash" :size="15" /></button><button class="icon-button" :aria-label="outputCollapsed ? '展开运行输出' : '收起运行输出'" :aria-expanded="!outputCollapsed" @click="outputCollapsed = !outputCollapsed"><UiIcon :name="outputCollapsed ? 'plus' : 'down'" :size="17" /></button></div></div>
       <template v-if="!outputCollapsed"><div v-if="outputRun" class="output-status"><span class="run-state" :class="outputRun.state"><i />{{ states[outputRun.state] }}</span><span>{{ duration(outputRun) }}</span><span v-if="outputRun.exitCode !== null">退出码 {{ outputRun.exitCode }}</span><span v-if="clipped" class="warning-text">输出已截断；清空显示不删除历史</span><span v-if="!follow" class="output-jump"><button @click="follow = true; scrollOutput()">查看最新输出 ↓</button></span></div><div ref="outputBody" class="output-body" tabindex="0" aria-label="脚本输出内容" @scroll="onOutputScroll"><pre v-if="chunks.length"><span v-for="(chunk, i) in chunks" :key="i" :class="chunk.stream">{{ chunk.text }}</span></pre><div v-else class="output-empty">{{ !outputRun ? '选择一个脚本，点击运行。' : outputCleared ? '当前显示已清空，点击“重新读取输出”查看历史。' : !logLoaded ? '正在读取运行输出…' : active(outputRun) ? '等待输出…' : '此次运行没有输出。' }}</div><div v-if="outputRun?.error" class="run-error">{{ outputRun.error }}</div></div></template>
     </section>

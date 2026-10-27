@@ -37,6 +37,63 @@ try{
   const state=await app.api('snapshot');assert.equal(state.config.scripts[0].program,process.execPath);assert.deepEqual(state.config.scripts[0].args,['a b 中文'])
   await cdp.evaluate(`document.querySelector('.advanced').open=true`);await fill('环境变量','INVALID');assert.equal(await cdp.evaluate(`document.querySelector('[aria-label="环境变量"]').getAttribute('aria-invalid')`),'true');await click('放弃修改','.config-form');await fill('环境变量','SCRIPT_STUDIO_UI_TEST=ok');await click('保存配置','.config-form');await until(async()=>(await app.api('snapshot')).config.scripts[0].env.SCRIPT_STUDIO_UI_TEST==='ok','environment after discard')
  })
+ await check('panel grid, drag, keyboard, viewport constraints and preference restoration',async()=>{
+  await until(()=>cdp.evaluate(`document.querySelector('.resize-handle-sidebar').getAttribute('aria-disabled')==='false'`),'layout loaded')
+  const geometry=()=>cdp.evaluate(`Object.fromEntries(['.sidebar','.script-list','.config-panel','.output-panel','.floating-config'].map(selector=>{const r=document.querySelector(selector).getBoundingClientRect();return [selector,{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}]}))`)
+  let boxes=await geometry()
+  assert.equal(boxes['.sidebar'].y,boxes['.script-list'].y)
+  assert.equal(boxes['.config-panel'].y,boxes['.script-list'].y)
+  assert.equal(boxes['.sidebar'].bottom,boxes['.script-list'].bottom)
+  assert.equal(boxes['.config-panel'].bottom,boxes['.script-list'].bottom)
+  assert.ok(boxes['.sidebar'].right<=boxes['.script-list'].x)
+  assert.ok(boxes['.script-list'].right<=boxes['.config-panel'].x)
+  const key=async(panel,key)=>{
+   await cdp.evaluate(`document.querySelector('.resize-handle-${panel}').focus()`)
+   await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key})
+   await cdp.command('Input.dispatchKeyEvent',{type:'keyUp',key})
+  }
+  for(const [panel,keyName,field,expected] of [['sidebar','ArrowRight','sidebarWidth',208],['config','ArrowLeft','configWidth',320],['output','ArrowUp','outputHeight',248]]){
+   await key(panel,keyName)
+   await until(async()=>(await app.api('ui.layout'))[field]===expected,'keyboard layout save')
+   assert.equal(await cdp.evaluate(`document.activeElement.getAttribute('role')`),'separator')
+   await key(panel,'Enter')
+  }
+  const handle=await cdp.evaluate(`(()=>{const r=document.querySelector('.resize-handle-config').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+  await cdp.command('Input.dispatchMouseEvent',{type:'mouseMoved',...handle})
+  await cdp.command('Input.dispatchMouseEvent',{type:'mousePressed',...handle,button:'left',clickCount:1})
+  await cdp.command('Input.dispatchMouseEvent',{type:'mouseMoved',x:handle.x-48,y:handle.y,buttons:1})
+  await cdp.command('Input.dispatchMouseEvent',{type:'mouseReleased',x:handle.x-48,y:handle.y,button:'left',clickCount:1})
+  await until(async()=>(await app.api('ui.layout')).configWidth===360,'pointer drag save')
+  await cdp.command('Page.reload')
+  await until(()=>cdp.evaluate(`document.querySelector('.resize-handle-config')?.getAttribute('aria-valuenow')==='360'`),'layout restored after reload')
+  await cdp.command('Emulation.setDeviceMetricsOverride',{width:1600,height:1100,deviceScaleFactor:1,mobile:false})
+  await until(()=>cdp.evaluate(`document.querySelector('.resize-handle-output').getAttribute('aria-valuemax')==='906'`),'large viewport measured')
+  await key('sidebar','End');await key('config','End');await key('output','End')
+  await until(async()=>(await app.api('ui.layout')).outputHeight===906,'large dimensions saved')
+  const saved=await app.api('ui.layout')
+  assert.equal(saved.sidebarWidth,360);assert.equal(saved.configWidth,520)
+  for(const [width,height] of [[1000,600],[480,420]]){
+   await cdp.command('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false})
+   await until(()=>cdp.evaluate(`document.querySelector('.output-panel').getBoundingClientRect().bottom<=innerHeight+1`),'constrained output fits viewport')
+   boxes=await geometry()
+   assert.ok(boxes['.script-list'].height>=130)
+   assert.ok(boxes['.script-list'].right<=width+1)
+   if(width>980)assert.ok(boxes['.config-panel'].right<=width+1)
+   else{
+    assert.equal(await cdp.evaluate(`getComputedStyle(document.querySelector('.resize-handle-sidebar')).display`),'none')
+    assert.ok(Math.abs(boxes['.floating-config'].bottom-(boxes['.output-panel'].y-12))<=1,'config button follows output boundary')
+   }
+   assert.deepEqual(await app.api('ui.layout'),saved,'viewport changes must not overwrite saved sizes')
+  }
+  await cdp.command('Emulation.setDeviceMetricsOverride',{width:1600,height:1100,deviceScaleFactor:1,mobile:false})
+  await until(()=>cdp.evaluate(`document.querySelector('.output-panel').getBoundingClientRect().height===906`),'larger viewport restores preferred height')
+  for(const panel of ['sidebar','config','output'])await key(panel,'Enter')
+  await until(async()=>{const saved=await app.api('ui.layout');return saved.sidebarWidth===200&&saved.configWidth===312&&saved.outputHeight===240},'reset dimensions saved')
+  await cdp.command('Emulation.setDeviceMetricsOverride',{width:1180,height:840,deviceScaleFactor:1,mobile:false})
+  await aria('收起运行输出')
+  assert.equal((await geometry())['.output-panel'].height,42)
+  await aria('展开运行输出')
+ })
  await check('copy saved and draft PowerShell commands with clipboard failure feedback',async()=>{
   await cdp.command('Browser.grantPermissions',{origin:app.desc.origin,permissions:['clipboardReadWrite','clipboardSanitizedWrite']})
   const button='复制 界面任务 的 PowerShell 命令'

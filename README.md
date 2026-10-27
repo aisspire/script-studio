@@ -42,12 +42,15 @@ npm run test:runtime
 npm run test:commands
 npm run test:terminal
 npm run test:ui
+npm run test:layout
 npm run test:bundle
 ```
 
 `test:runtime` 只运行生成的隔离 fixture，Windows 下覆盖 Job Object、PowerShell、CMD 和可用 WSL；`test:commands` 在已有 Windows PowerShell 中实际执行复制命令的隔离 fixture，检查路径及参数转交；`test:ui` 使用已有 Edge 的独立测试 Profile，不安装浏览器；`test:bundle` 检查目录包移动及 PowerShell 包装入口。测试数据及截图位于本仓库 target 下。可用 `SCRIPT_STUDIO_BIN`、`SCRIPT_STUDIO_EDGE`、`SCRIPT_STUDIO_BUNDLE` 指定已构建产物。
 
 Windows 与 WSL 使用各自的 node_modules。共享工作区缺少 Linux 原生绑定时，在临时目录复制当前源码、manifest 和 lockfile，运行 `npm ci --offline --include=optional`、`npm run build`；缓存不完整时仅在临时目录按相同锁文件获取依赖，不改写工作区依赖。
+
+`test:layout` 可在 Windows 或 Linux 运行，检查面板尺寸与键盘边界，以及隔离后台重启、端口变化后的偏好恢复和无效文件保护；需先构建本平台后台。实际网格布局、拖拽与窄窗交互由 Windows `test:ui` 检查。
 
 ## 文档
 

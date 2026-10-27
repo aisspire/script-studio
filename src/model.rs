@@ -16,6 +16,37 @@ pub fn now() -> u64 {
         .as_millis() as u64
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiLayout {
+    pub version: u32,
+    pub sidebar_width: u32,
+    pub config_width: u32,
+    pub output_height: u32,
+}
+impl Default for UiLayout {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            sidebar_width: 200,
+            config_width: 312,
+            output_height: 240,
+        }
+    }
+}
+impl UiLayout {
+    pub fn validate(&self) -> Result<()> {
+        if self.version != 1
+            || !(160..=360).contains(&self.sidebar_width)
+            || !(260..=520).contains(&self.config_width)
+            || !(110..=4096).contains(&self.output_height)
+        {
+            return Err("面板布局版本或尺寸无效。".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Runner {

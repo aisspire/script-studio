@@ -139,6 +139,27 @@ impl Store {
             &serde_json::to_vec(run).map_err(|e| e.to_string())?,
         )
     }
+    pub fn ui_layout(&self) -> Result<UiLayout> {
+        let path = self.directory.join("ui-layout.json");
+        let data = match bytes(&path, 4096) {
+            Ok(data) => data,
+            Err(_) if !path.exists() => return Ok(UiLayout::default()),
+            Err(e) => return Err(e),
+        };
+        let layout: UiLayout = serde_json::from_slice(&data)
+            .map_err(|e| format!("面板布局无法读取，原文件已保留：{e}"))?;
+        layout.validate()?;
+        Ok(layout)
+    }
+    pub fn save_ui_layout(&self, layout: &UiLayout) -> Result<()> {
+        layout.validate()?;
+        // Preserve malformed or future-version preferences instead of overwriting them.
+        self.ui_layout()?;
+        atomic(
+            &self.directory.join("ui-layout.json"),
+            &serde_json::to_vec_pretty(layout).map_err(|e| e.to_string())?,
+        )
+    }
     pub fn load_runs(&self) -> (Vec<Run>, Vec<String>) {
         let mut runs = vec![];
         let mut warnings = vec![];
@@ -177,6 +198,71 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ui_layout_survives_reopen_without_changing_script_revision() {
+        let dir = std::env::temp_dir().join(id());
+        let mut store = Store::open(dir.clone()).unwrap();
+        let revision = store.revision.clone();
+        store.save(Config::default(), &revision).unwrap();
+        let revision = store.revision.clone();
+        let config = fs::read(dir.join("config.json")).unwrap();
+        assert_eq!(store.ui_layout().unwrap(), UiLayout::default());
+        let layout = UiLayout {
+            sidebar_width: 360,
+            config_width: 520,
+            output_height: 900,
+            ..UiLayout::default()
+        };
+        store.save_ui_layout(&layout).unwrap();
+        drop(store);
+        let store = Store::open(dir.clone()).unwrap();
+        assert_eq!(store.ui_layout().unwrap(), layout);
+        assert_eq!(store.revision, revision);
+        assert_eq!(fs::read(dir.join("config.json")).unwrap(), config);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn invalid_ui_layout_is_rejected_and_existing_file_is_preserved() {
+        let dir = std::env::temp_dir().join(id());
+        let store = Store::open(dir.clone()).unwrap();
+        let layout = UiLayout::default();
+        store.save_ui_layout(&layout).unwrap();
+        let original = fs::read(dir.join("ui-layout.json")).unwrap();
+        for invalid in [
+            UiLayout {
+                version: 2,
+                ..layout.clone()
+            },
+            UiLayout {
+                sidebar_width: 0,
+                ..layout.clone()
+            },
+            UiLayout {
+                config_width: 521,
+                ..layout.clone()
+            },
+            UiLayout {
+                output_height: 4097,
+                ..layout.clone()
+            },
+        ] {
+            assert!(store.save_ui_layout(&invalid).is_err());
+            assert_eq!(fs::read(dir.join("ui-layout.json")).unwrap(), original);
+        }
+        for damaged in [
+            "broken",
+            "{\"version\":2,\"sidebarWidth\":200,\"configWidth\":312,\"outputHeight\":240}",
+        ] {
+            fs::write(dir.join("ui-layout.json"), damaged).unwrap();
+            assert!(store.ui_layout().is_err());
+            assert!(store.save_ui_layout(&layout).is_err());
+            assert_eq!(
+                fs::read_to_string(dir.join("ui-layout.json")).unwrap(),
+                damaged
+            );
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn damaged_and_externally_modified_config_is_preserved() {
         let dir = std::env::temp_dir().join(id());

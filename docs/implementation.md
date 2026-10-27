@@ -8,6 +8,10 @@
 
 脚本字段：id、name、description、path、groupId、favorite、runner、program、interpreterArgs、args、cwd、env、encoding。path/cwd 使用绝对路径；cwd 空值取脚本父目录。自定义解释器命令为 program、interpreterArgs、path、args。解释器是否存在及脚本是否可执行在运行时检查。
 
+面板偏好单独保存在数据目录 `ui-layout.json`，版本 1 包含 `sidebarWidth`（160–360）、`configWidth`（260–520）和 `outputHeight`（110–4096），单位为 CSS 像素。缺少文件时使用 200／312／240 默认值；读写校验版本、完整字段和尺寸范围，原子保存，多个页面以最后成功保存为准。不修改 `config.json` 及其 revision，不依赖随后台端口改变的浏览器 localStorage。损坏、超出 4 KiB 或版本不支持时保留文件，界面回退默认尺寸并提示错误，后续保存也拒绝覆盖该文件；不阻止读取脚本配置或管理已有任务。
+
+实际显示按容器限制两侧宽度并为中间列表保留至少 240px；输出上限扣除 Header 实测高度及工作区最小 130px。容器变化由 ResizeObserver 更新，只影响显示，不保存临时收缩值。桌面分隔条与面板共用明确 Grid 区域，窄窗隐藏两侧分隔条并保留原侧面板布局；悬浮配置按钮跟随实际输出边界。
+
 runs 中每次运行独立存储 JSON 快照和 JSONL 输出。状态为 running、stopping、succeeded、failed、stopped、interrupted；时间采用 Unix 毫秒。后台恢复将活动记录标记为 interrupted，保留诊断，不恢复进程、不重跑脚本。快照接口只发送运行摘要；完整启动配置保留在运行文件。
 
 ## 私有 HTTP 接口
@@ -20,6 +24,8 @@ runs 中每次运行独立存储 JSON 快照和 JSONL 输出。状态为 running
 | --- | --- |
 | status | 紧凑就绪信息：instance、ready、closing、activeRuns |
 | snapshot | 配置、revision、可写诊断、数据目录、运行摘要、警告 |
+| ui.layout | 读取工具自身的面板尺寸偏好；缺少文件时返回默认值 |
+| ui.layout.save | layout；校验并原子保存完整偏好，返回已保存布局，不改变脚本配置 revision |
 | reload | 显式重新读配置，不启动或重启任务 |
 | save | config、revision；原子保存后返回 snapshot |
 | file.pick | 后台打开一个 Windows 文件选择器，返回 path 或 null；退出取消辅助进程 |

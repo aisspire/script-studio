@@ -12,6 +12,7 @@
     "test:commands": "node scripts/check-commands.mjs",
     "test:terminal": "node scripts/check-terminal.mjs",
     "test:ui": "node scripts/check-ui.mjs",
+    "test:layout": "node scripts/check-layout.mjs",
     "test:bundle": "node scripts/check-bundle.mjs"
   },
   "dependencies": { "vue": "3.5.44" },

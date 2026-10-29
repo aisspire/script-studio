@@ -47,6 +47,8 @@ try{
   assert.equal(boxes['.config-panel'].bottom,boxes['.script-list'].bottom)
   assert.ok(boxes['.sidebar'].right<=boxes['.script-list'].x)
   assert.ok(boxes['.script-list'].right<=boxes['.config-panel'].x)
+  assert.equal(boxes['.output-panel'].height,42,'output panel is collapsed by default')
+  await aria('展开运行输出')
   const key=async(panel,key)=>{
    await cdp.evaluate(`document.querySelector('.resize-handle-${panel}').focus()`)
    await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key})

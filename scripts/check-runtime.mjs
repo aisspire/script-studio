@@ -117,7 +117,7 @@ try{
   await app.exit();const files=(await readdir(path.join(dir,'runs'))).filter(f=>f.endsWith('.json'));const sample=JSON.parse(await readFile(path.join(dir,'runs',files[0]),'utf8'))
   for(let i=0;i<105;i++){const value={...sample,id:crypto.randomUUID(),startedAt:i,endedAt:i+1,state:'succeeded'};await writeFile(path.join(dir,'runs',`${value.id}.json`),JSON.stringify(value))}
   const long={...sample,id:crypto.randomUUID(),startedAt:0,endedAt:Date.now(),state:'succeeded'};await writeFile(path.join(dir,'runs',`${long.id}.json`),JSON.stringify(long))
-  app=await launch(dir);const retained=(await app.api('snapshot')).runs;assert.equal(retained.length,100);assert.ok(retained.some(r=>r.id===long.id),'recently completed long task is retained by completion time');assert.equal((await readdir(path.join(dir,'runs'))).filter(f=>f.endsWith('.json')).length,100)
+  app=await launch(dir);const retained=(await app.api('snapshot')).runs;assert.equal(retained.length,1);assert.ok(retained.some(r=>r.id===long.id),'recently completed long task is retained by completion time');assert.equal((await readdir(path.join(dir,'runs'))).filter(f=>f.endsWith('.json')).length,1)
  })
  console.log(JSON.stringify({root,binary:binary(),passed:passes.length,skipped},null,2))
 }finally{external?.kill();await app?.exit()}

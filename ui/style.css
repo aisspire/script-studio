@@ -17,3 +17,6 @@
 
 .studio.is-resizing{user-select:none}
 .resize-handle-v:focus-visible,.resize-handle-output:focus-visible{outline:2px solid var(--focus);outline-offset:-2px;background:var(--accent)}
+.read-history-btn{font-size:11px;padding:3px 7px;color:var(--accent);display:inline-flex;align-items:center;gap:4px}
+.history-prompt{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:4px 0}
+.history-prompt .load-history-btn{min-height:28px;padding:5px 12px;font-size:11px}

@@ -18,7 +18,7 @@ use std::{
 };
 
 pub const LOG_LIMIT: u64 = 10 * 1024 * 1024;
-const HISTORY_LIMIT: usize = 100;
+const HISTORY_LIMIT: usize = 1;
 pub struct State {
     pub store: Store,
     pub runs: Vec<Run>,

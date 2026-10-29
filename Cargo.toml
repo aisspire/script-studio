@@ -3,6 +3,10 @@ name = "script-studio"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
+description = "Windows 本地脚本管理器与 Oriel 插件"
+license = "MIT"
+repository = "https://github.com/aisspire/script-studio"
+readme = "README.md"
 publish = false
 
 [dependencies]

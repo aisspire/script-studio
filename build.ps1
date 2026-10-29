@@ -23,7 +23,7 @@ try {
     if (Test-Path $bundle) { Remove-Item -Recurse -Force $bundle }
     New-Item -ItemType Directory -Path $bundle -Force | Out-Null
     Copy-Item "target/windows/$profile/script-studio.exe" $bundle
-    Copy-Item 'plugin.json','oriel.ps1','USER_GUIDE.md','Open-ScriptStudio.cmd' $bundle
+    Copy-Item 'plugin.json','oriel.ps1','USER_GUIDE.md','Open-ScriptStudio.cmd','LICENSE' $bundle
     Copy-Item -Recurse 'dist' $bundle
     Write-Output "Bundle: $bundle"
 } finally {

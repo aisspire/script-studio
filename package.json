@@ -1,6 +1,14 @@
 {
   "name": "script-studio",
   "version": "0.1.0",
+  "description": "Windows 本地脚本管理器与 Oriel 插件",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aisspire/script-studio.git"
+  },
+  "homepage": "https://github.com/aisspire/script-studio#readme",
+  "bugs": "https://github.com/aisspire/script-studio/issues",
   "private": true,
   "type": "module",
   "packageManager": "npm@10.9.8",

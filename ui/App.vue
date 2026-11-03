@@ -4,7 +4,7 @@ import UiIcon from './UiIcon.vue'
 import ActionMenu from './ActionMenu.vue'
 import SplitRunButton from './SplitRunButton.vue'
 import EnvEditor from './EnvEditor.vue'
-import { highlight, logLines, parseEnvironment, readPreference, writePreference, type RunMode } from './studioState'
+import { highlight, logLines, parseEnvironment, runSession, readPreference, writePreference, type RunMode } from './studioState'
 import ToastNotifications from './ToastNotifications.vue'
 import { powershellCommand } from './command'
 import { usePanelLayout } from './usePanelLayout'
@@ -16,15 +16,14 @@ const draft = ref<Script | null>(null), base = ref<Script | null>(null), draftRe
 const envText = ref(''), envBase = ref(''), envError = ref('')
 const busy = ref(false), loading = ref(true), error = ref(''), notice = ref(''), offline = ref(false), exited = ref(false)
 const connectionError = ref('')
-const sidebarOpen = ref(false), configOpen = ref(false), outputCollapsed = ref(false), outputMaximized = ref(false)
+const sidebarOpen = ref(false), configOpen = ref(false), outputCollapsed = ref(true), outputMaximized = ref(false)
 const ctrlHeld = ref(false)
-const viewMode = ref(readPreference('view') === 'compact' ? 'compact' : 'cards')
+const legacyView = readPreference('view')
 const runModes = ref<Record<string, RunMode>>({})
 const savedModes = readPreference('run-modes')
 if (savedModes && typeof savedModes === 'object' && !Array.isArray(savedModes)) {
   for (const [id, mode] of Object.entries(savedModes)) if (mode === 'managed' || mode === 'external') runModes.value[id] = mode
 }
-watch(viewMode, value => writePreference('view', value))
 const now = ref(Date.now())
 let clockTimer: ReturnType<typeof setInterval> | undefined
 const streamFilter = ref('all'), logQuery = ref(''), searchOpen = ref(false), logSearch = ref<HTMLInputElement>()
@@ -81,13 +80,20 @@ const preview = computed(() => draft.value ? powershellCommand(draft.value) : ''
 const duration = (r: Run) => `${Math.max(0, Math.floor(((r.endedAt ?? now.value) - r.startedAt) / 1000))} 秒`
 const elapsed = (r: Run) => { const seconds = Math.max(0, Math.floor(((r.endedAt ?? now.value) - r.startedAt) / 1000)); return `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}` }
 const date = (value: number) => new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-const latest = (id: string) => data.value?.runs.find(r => r.scriptId === id)
+const historicalRunIds = ref(new Set<string>())
+const latest = (id: string) => data.value?.runs.find(r => r.scriptId === id && (active(r) || !historicalRunIds.value.has(r.id)))
 
 function resetDraft() { draft.value = current.value ? copy(current.value) : null; base.value = draft.value ? copy(draft.value) : null; draftRevision.value = data.value?.revision || ''; envText.value = Object.entries(draft.value?.env || {}).map(([k,v]) => `${k}=${v}`).join('\n'); envBase.value = envText.value; envError.value = '' }
 watch(current, () => { if (!dirty.value || draft.value?.id !== selected.value) resetDraft() })
 watch(selected, () => { outputId.value = ''; resetDraft() })
 watch(() => outputRun.value?.id, () => { logGeneration++; cursor.value = 0; chunks.value = []; clipped.value = false; follow.value = true; logLoaded.value = false; outputCleared.value = false })
 function install(snapshot: Snapshot) {
+  if (data.value?.instance !== snapshot.instance) {
+    const session = runSession(snapshot.instance, snapshot.runs, readPreference('run-session'))
+    historicalRunIds.value = new Set(session.historicalRunIds)
+    writePreference('run-session', session)
+    outputId.value = ''; outputCollapsed.value = true; outputMaximized.value = false
+  }
   data.value = snapshot
   if (!scripts.value.some(s => s.id === selected.value) && !dirty.value) selected.value = scripts.value[0]?.id || ''
   if (page.value !== 'all' && page.value !== 'favorites' && page.value !== 'ungrouped' && !snapshot.config.groups.some(g => g.id === page.value)) page.value = 'all'
@@ -218,7 +224,7 @@ function markBackdrop(event: PointerEvent) { if (event.currentTarget) backdrop.s
 function dismissBackdrop(event: MouseEvent) { if (event.currentTarget && backdrop.get(event.currentTarget) && outside(event)) (event.currentTarget as HTMLDialogElement).close() }
 function beforeUnload(event: BeforeUnloadEvent) { if (dirty.value) { event.preventDefault(); event.returnValue = '' } }
 
-const { studio, header, layout, ready: layoutReady, maximum: layoutMaximum, resizingPanel, startResize, resizeKey, reset: resetPanel } = usePanelLayout(message => { error.value = message })
+const { studio, header, layout, viewMode, ready: layoutReady, maximum: layoutMaximum, resizingPanel, startResize, resizeKey, reset: resetPanel } = usePanelLayout(message => { error.value = message }, legacyView === 'compact' || legacyView === 'cards' ? legacyView : undefined)
 
 onMounted(() => {
   window.addEventListener('beforeunload', beforeUnload); window.addEventListener('keydown', consoleKey); window.addEventListener('keydown', escapePanel)
@@ -261,7 +267,7 @@ onBeforeUnmount(() => {
         @pointerdown="startResize('sidebar', $event)" @keydown="resizeKey('sidebar', $event)" @dblclick="resetPanel('sidebar')" />
       <main class="script-list" :inert="outputMaximized">
         <div class="list-heading"><h1>{{ pageTitle }}<span>{{ visible.length }}</span></h1><select v-model="type" aria-label="筛选脚本类型"><option>全部类型</option><option v-for="item in types" :key="item">{{ item }}</option></select></div>
-        <div class="list-toolbar"><label class="search"><UiIcon name="search" :size="16" /><input v-model="query" aria-label="搜索脚本" placeholder="搜索名称、路径或备注…" type="search" /></label><div class="segmented view-switch" role="group" aria-label="列表视图"><button aria-label="卡片视图" title="卡片视图" :aria-pressed="viewMode === 'cards'" @click="viewMode = 'cards'"><UiIcon name="grid" :size="16" /></button><button aria-label="紧凑列表视图" title="紧凑列表视图" :aria-pressed="viewMode === 'compact'" @click="viewMode = 'compact'"><UiIcon name="list" :size="16" /></button></div></div>
+        <div class="list-toolbar"><label class="search"><UiIcon name="search" :size="16" /><input v-model="query" aria-label="搜索脚本" placeholder="搜索名称、路径或备注…" type="search" /></label><div class="segmented view-switch" role="group" aria-label="列表视图"><button :disabled="!layoutReady" aria-label="卡片视图" title="卡片视图" :aria-pressed="viewMode === 'cards'" @click="viewMode = 'cards'"><UiIcon name="grid" :size="16" /></button><button :disabled="!layoutReady" aria-label="紧凑列表视图" title="紧凑列表视图" :aria-pressed="viewMode === 'compact'" @click="viewMode = 'compact'"><UiIcon name="list" :size="16" /></button></div></div>
         <div class="cards" :class="{ compact: viewMode === 'compact' }" @keydown="navigateScripts">
           <div v-if="loading" class="empty">正在连接本地后台…</div>
           <article v-for="script in visible" :key="script.id" class="script-card" :class="{ 'is-selected': selected === script.id }">

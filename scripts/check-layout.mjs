@@ -8,7 +8,7 @@ import { launch, temp } from './lib.mjs'
 const vite = await createServer({ configFile: false, server: { middlewareMode: true }, appType: 'custom' })
 try {
   const { defaultLayout, fitLayout, keyboardSize } = await vite.ssrLoadModule('/ui/panelLayout.ts')
-  const preferred = { ...defaultLayout, sidebarWidth: 360, configWidth: 520, outputHeight: 900 }
+  const preferred = { ...defaultLayout, sidebarWidth: 360, configWidth: 520, outputHeight: 900, viewMode: 'compact' }
   for (const width of [981, 1000, 1024, 1180, 1600]) {
     for (const height of [420, 480, 600, 900, 1400]) {
       const fitted = fitLayout(preferred, width, height, 64)
@@ -44,6 +44,11 @@ try {
     assert.equal((await app.api('snapshot')).revision, before.revision)
     await assert.rejects(app.api('ui.layout.save', { layout: { ...preferred, sidebarWidth: 900 } }), /尺寸无效/)
     assert.deepEqual(await app.api('ui.layout'), preferred)
+    await assert.rejects(app.api('ui.layout.save', { layout: { ...preferred, viewMode: 'invalid' } }))
+    assert.deepEqual(await app.api('ui.layout'), preferred)
+    const legacy = await app.api('ui.layout.save', { layout: defaultLayout })
+    assert.equal(legacy.viewMode, 'compact', 'dimension-only clients preserve view preference')
+    await app.api('ui.layout.save', { layout: preferred })
     const origin = app.desc.origin
     await app.exit()
     app = await launch(directory)

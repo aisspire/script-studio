@@ -1,4 +1,5 @@
-export interface PanelLayout { version: number; sidebarWidth: number; configWidth: number; outputHeight: number }
+export type ListView = 'cards' | 'compact'
+export interface PanelLayout { version: number; sidebarWidth: number; configWidth: number; outputHeight: number; viewMode?: ListView }
 export type Panel = 'sidebar' | 'config' | 'output'
 export const defaultLayout: PanelLayout = { version: 1, sidebarWidth: 200, configWidth: 312, outputHeight: 240 }
 export const clamp = (value: number, min: number, max: number) => Math.round(Math.max(min, Math.min(max, value)))
@@ -7,7 +8,7 @@ export const clamp = (value: number, min: number, max: number) => Math.round(Mat
 export function fitLayout(preferred: PanelLayout, width: number, height: number, headerHeight: number): PanelLayout {
   const sidebarWidth = clamp(preferred.sidebarWidth, 160, Math.min(360, width - 240 - 260))
   const configWidth = clamp(preferred.configWidth, 260, Math.min(520, width - 240 - sidebarWidth))
-  return { version: 1, sidebarWidth, configWidth, outputHeight: clamp(preferred.outputHeight, 110, outputMaximum(height, headerHeight)) }
+  return { ...preferred, version: 1, sidebarWidth, configWidth, outputHeight: clamp(preferred.outputHeight, 110, outputMaximum(height, headerHeight)) }
 }
 export const outputMaximum = (height: number, headerHeight: number) => Math.max(110, Math.min(4096, Math.floor(height - headerHeight - 130)))
 export const panelField = { sidebar: 'sidebarWidth', config: 'configWidth', output: 'outputHeight' } as const

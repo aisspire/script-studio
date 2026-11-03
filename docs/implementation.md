@@ -8,7 +8,7 @@
 
 脚本字段：id、name、description、path、groupId、favorite、runner、program、interpreterArgs、args、cwd、env、encoding。path/cwd 使用绝对路径；cwd 空值取脚本父目录。自定义解释器命令为 program、interpreterArgs、path、args。解释器是否存在及脚本是否可执行在运行时检查。
 
-面板偏好单独保存在数据目录 `ui-layout.json`，版本 1 包含 `sidebarWidth`（160–360）、`configWidth`（260–520）和 `outputHeight`（110–4096），单位为 CSS 像素。缺少文件时使用 200／312／240 默认值；读写校验版本、完整字段和尺寸范围，原子保存，多个页面以最后成功保存为准。不修改 `config.json` 及其 revision，不依赖随后台端口改变的浏览器 localStorage。损坏、超出 4 KiB 或版本不支持时保留文件，界面回退默认尺寸并提示错误，后续保存也拒绝覆盖该文件；不阻止读取脚本配置或管理已有任务。
+面板偏好单独保存在数据目录 `ui-layout.json`，版本 1 包含 `sidebarWidth`（160–360）、`configWidth`（260–520）和 `outputHeight`（110–4096），单位为 CSS 像素；可选 `viewMode` 为 cards／compact。缺少文件时使用 200／312／240 默认值；读写校验版本、完整字段和尺寸范围，原子保存，多个页面以最后成功保存为准。不修改 `config.json` 及其 revision，不依赖随后台端口改变的浏览器 localStorage。损坏、超出 4 KiB 或版本不支持时保留文件，界面回退默认尺寸并提示错误，后续保存也拒绝覆盖该文件；不阻止读取脚本配置或管理已有任务。
 
 实际显示按容器限制两侧宽度并为中间列表保留至少 240px；输出上限扣除 Header 实测高度及工作区最小 130px。容器变化由 ResizeObserver 更新，只影响显示，不保存临时收缩值。桌面分隔条与面板共用明确 Grid 区域，窄窗隐藏两侧分隔条并保留原侧面板布局；悬浮配置按钮跟随实际输出边界。
 
@@ -24,7 +24,7 @@ runs 中每次运行独立存储 JSON 快照和 JSONL 输出。状态为 running
 | --- | --- |
 | status | 紧凑就绪信息：instance、ready、closing、activeRuns |
 | snapshot | 配置、revision、可写诊断、数据目录、运行摘要、警告 |
-| ui.layout | 读取工具自身的面板尺寸偏好；缺少文件时返回默认值 |
+| ui.layout | 读取工具自身的面板尺寸及列表视图偏好；缺少文件时返回默认值 |
 | ui.layout.save | layout；校验并原子保存完整偏好，返回已保存布局，不改变脚本配置 revision |
 | reload | 显式重新读配置，不启动或重启任务 |
 | save | config、revision；原子保存后返回 snapshot |
@@ -63,8 +63,12 @@ stdin EOF 独立触发清理，正在执行的业务动作不阻止退出请求�
 
 ## 前端交互状态（2026-11-03）
 
-新增 `EnvEditor`、`SplitRunButton`、`ActionMenu` 组件及 `studioState` 纯逻辑模块；不修改 Rust 类型、HTTP 动作、stdio 消息、配置版本或布局文件结构。环境变量表格与纯文本共享一份文本草稿，合法时更新待保存的 env 对象；无效时阻止保存，放弃恢复原值。命令预览继续使用 `powershellCommand`，不把 cwd／env 注入粘贴命令。
+新增 `EnvEditor`、`SplitRunButton`、`ActionMenu` 组件及 `studioState` 纯逻辑模块；布局新增可选视图字段，HTTP 动作、stdio 消息和脚本配置版本保持兼容。环境变量表格与纯文本共享一份文本草稿，合法时更新待保存的 env 对象；无效时阻止保存，放弃恢复原值。命令预览继续使用 `powershellCommand`，不把 cwd／env 注入粘贴命令。
 
-`script-studio:view` 和 `script-studio:run-modes` 为当前来源 localStorage 中的展示／运行偏好。读取校验、写入异常均有回退，不阻止核心操作；运行偏好仅在成功的启动响应后写入，按稳定脚本 ID 区分。不写入 Oriel 配置或插件业务配置，跨随机端口恢复不在该存储方案保证内。
+`script-studio:run-modes` 为当前来源 localStorage 中的运行偏好。读取校验、写入异常均有回退，不阻止核心操作；仅在成功启动响应后写入，按稳定脚本 ID 区分。不写入 Oriel 配置或插件业务配置，运行方式跨随机端口恢复不在该存储方案保证内。旧 `script-studio:view` 仅作为迁移来源。
 
 控制台最大化为前端覆盖状态，不持久化为拖拽高度；覆盖的脚本／配置区域使用 inert 避免键盘进入不可见内容。菜单 Teleport 到页面顶层以避免被滚动容器裁切，支持方向键、Home／End、Esc、Tab 与焦点归还。日志按流重建行后应用字面、大小写不敏感的过滤和 Vue 文本高亮，不使用 HTML 注入；复制输出应用当前过滤条件，清空／重读保留后端历史语义。计时器独立每秒更新并在卸载时清理。
+
+启动时控制台固定收起，已结束历史不自动读取。前端使用既有 `snapshot.instance` 和运行 ID 建立展示基线：首次连接该实例时将快照中的非活动记录记为历史，列表排除这些记录，活动运行始终可见；新产生的记录正常显示结果。基线以 `script-studio:run-session` 保存到当前来源 localStorage，按实例校验、只保留当前快照内的 ID。刷新复用同实例基线，后台重启后的新实例重新划分；存储损坏／不可用时以首次快照回退，不影响运行和历史读取。独立打开页面时，若该来源尚无对应实例基线，已经结束的记录也作为历史。该划分仅影响列表展示，不删除历史文件、不改变 Rust 状态或 HTTP／stdio 契约。
+
+`UiLayout.viewMode` 是可选枚举，省略时兼容旧尺寸文件，未迁移偏好时显示 cards。读取后由后端文件值覆盖浏览器旧值；文件尚无视图且浏览器旧值合法时通过 `ui.layout.save` 迁移。用户切换与尺寸更新共用顺序保存队列，切换立即发起保存，不依赖卸载回调；失败在界面提示，再次点击当前视图也会重试保存。服务端拒绝未知枚举，保护损坏文件；尺寸请求省略 viewMode 时合并保留已有值，返回实际保存的完整布局。保存不改变脚本配置修订号。旧后台不支持该可选字段，因此应同时更新程序与 dist；这不是仅替换前端即可完成的修复。

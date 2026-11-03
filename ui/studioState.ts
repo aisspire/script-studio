@@ -1,4 +1,4 @@
-import type { Chunk } from './api'
+import type { Chunk, Run } from './api'
 export type RunMode = 'managed' | 'external'
 export function readPreference(key: string): unknown {
   try { return JSON.parse(localStorage.getItem(`script-studio:${key}`) || 'null') } catch { return null }
@@ -43,4 +43,16 @@ export function highlight(text: string, query: string) {
   }
   if (start < text.length) result.push({ text: text.slice(start), match: false })
   return result
+}
+
+export interface RunSession { instance: string; historicalRunIds: string[] }
+// History remains readable, but is not the current script status in a new session.
+// Keep this baseline across page reloads; a new backend instance starts a new one.
+export function runSession(instance: string, runs: Pick<Run, 'id' | 'state'>[], stored: unknown): RunSession {
+  if (stored && typeof stored === 'object' && 'instance' in stored && stored.instance === instance
+    && 'historicalRunIds' in stored && Array.isArray(stored.historicalRunIds)
+    && stored.historicalRunIds.every(id => typeof id === 'string')) {
+    return { instance, historicalRunIds: stored.historicalRunIds.filter(id => runs.some(run => run.id === id)) }
+  }
+  return { instance, historicalRunIds: runs.filter(run => !['running', 'stopping'].includes(run.state)).map(run => run.id) }
 }

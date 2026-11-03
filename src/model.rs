@@ -17,12 +17,21 @@ pub fn now() -> u64 {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ListView {
+    Cards,
+    Compact,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UiLayout {
     pub version: u32,
     pub sidebar_width: u32,
     pub config_width: u32,
     pub output_height: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_mode: Option<ListView>,
 }
 impl Default for UiLayout {
     fn default() -> Self {
@@ -31,6 +40,7 @@ impl Default for UiLayout {
             sidebar_width: 200,
             config_width: 312,
             output_height: 240,
+            view_mode: None,
         }
     }
 }

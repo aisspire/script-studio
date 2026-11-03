@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import ts from 'typescript'
 const source = await readFile(new URL('../ui/studioState.ts', import.meta.url), 'utf8')
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText
-const { parseEnvironment, logLines, highlight, readPreference, writePreference } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
+const { runSession, parseEnvironment, logLines, highlight, readPreference, writePreference } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
 const env = parseEnvironment('# comment\r\nNAME=a=b\r\nEMPTY=\n_UNICODE=中文 空格\n__proto__=safe')
 assert.deepEqual({ ...env.values }, { NAME: 'a=b', EMPTY: '', _UNICODE: '中文 空格', ['__proto__']: 'safe' })
 assert.deepEqual(env.errors, {})
@@ -19,3 +19,11 @@ globalThis.localStorage = { getItem: () => '{bad json', setItem: () => { throw E
 assert.equal(readPreference('corrupt'), null)
 assert.doesNotThrow(() => writePreference('view', 'compact'))
 console.log('PASS environment validation, stream reassembly, literal search highlighting and storage failure fallback')
+
+const past = ['succeeded', 'failed', 'stopped', 'interrupted'].map(state => ({ id: state, state }))
+const initial = runSession('first', [...past, { id: 'live', state: 'running' }, { id: 'stopping', state: 'stopping' }], null)
+assert.deepEqual(initial.historicalRunIds, past.map(run => run.id))
+assert.deepEqual(runSession('first', [...past, { id: 'live', state: 'succeeded' }], initial), initial)
+assert.ok(runSession('second', [...past, { id: 'live', state: 'stopped' }], initial).historicalRunIds.includes('live'))
+assert.deepEqual(runSession('first', past, { instance: 'first', historicalRunIds: [123] }).historicalRunIds, initial.historicalRunIds)
+console.log('PASS session baseline, page reload continuity, restart reset and invalid storage fallback')

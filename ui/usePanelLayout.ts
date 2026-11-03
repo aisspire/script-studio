@@ -1,13 +1,21 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from './api'
-import { clamp, defaultLayout, fitLayout, keyboardSize, minimum, outputMaximum, panelField, type Panel, type PanelLayout } from './panelLayout'
+import { clamp, defaultLayout, fitLayout, keyboardSize, minimum, outputMaximum, panelField, type ListView, type Panel, type PanelLayout } from './panelLayout'
 
-export function usePanelLayout(reportError: (message: string) => void) {
+export function usePanelLayout(reportError: (message: string) => void, legacyView?: ListView) {
   const studio = ref<HTMLElement>(), header = ref<HTMLElement>()
   const preferred = ref<PanelLayout>({ ...defaultLayout })
   const viewport = ref({ width: window.innerWidth, height: Math.max(420, window.innerHeight), header: window.innerWidth <= 620 ? 56 : 64 })
   const ready = ref(false), resizingPanel = ref<Panel | null>(null)
   const layout = computed(() => fitLayout(preferred.value, viewport.value.width, viewport.value.height, viewport.value.header))
+  const viewMode = computed<ListView>({
+    get: () => preferred.value.viewMode || legacyView || 'cards',
+    set: value => {
+      // Re-selecting the current view also retries a previously failed save.
+      if (!ready.value) return
+      preferred.value = { ...preferred.value, viewMode: value }; persist()
+    },
+  })
   const maximum = computed(() => ({
     sidebar: Math.min(360, viewport.value.width - 240 - layout.value.configWidth),
     config: Math.min(520, viewport.value.width - 240 - layout.value.sidebarWidth),
@@ -23,7 +31,7 @@ export function usePanelLayout(reportError: (message: string) => void) {
     clearTimeout(saveTimer); saveTimer = undefined
     const saved = { ...preferred.value }
     saveQueue = saveQueue.then(async () => { await api('ui.layout.save', { layout: saved }) }).catch(e => {
-      if (!disposed) reportError(`面板尺寸未保存：${e instanceof Error ? e.message : String(e)}`)
+      if (!disposed) reportError(`界面偏好未保存，请重试：${e instanceof Error ? e.message : String(e)}`)
     })
   }
   function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(persist, 180) }
@@ -77,7 +85,13 @@ export function usePanelLayout(reportError: (message: string) => void) {
     measure(); observer = new ResizeObserver(measure)
     if (studio.value) observer.observe(studio.value)
     if (header.value) observer.observe(header.value)
-    void api<PanelLayout>('ui.layout').then(saved => { if (!disposed) preferred.value = saved }).catch(e => {
+    void api<PanelLayout>('ui.layout').then(saved => {
+      if (disposed) return
+      preferred.value = saved
+      if (!saved.viewMode && legacyView) {
+        preferred.value = { ...saved, viewMode: legacyView }; persist()
+      }
+    }).catch(e => {
       if (!disposed) reportError(`面板布局读取失败：${e instanceof Error ? e.message : String(e)}`)
     }).finally(() => { if (!disposed) ready.value = true })
   })
@@ -86,5 +100,5 @@ export function usePanelLayout(reportError: (message: string) => void) {
     if (saveTimer !== undefined) persist()
     disposed = true
   })
-  return { studio, header, layout, ready, maximum, resizingPanel, startResize, resizeKey, reset }
+  return { studio, header, layout, viewMode, ready, maximum, resizingPanel, startResize, resizeKey, reset }
 }

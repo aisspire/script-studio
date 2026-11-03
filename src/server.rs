@@ -30,7 +30,7 @@ pub async fn action(rt: &Arc<Runtime>, value: Value) -> Result<Value> {
                 return Err("后台正在退出。".into());
             }
             s.store.save_ui_layout(&layout)?;
-            Ok(json!(layout))
+            Ok(json!(s.store.ui_layout()?))
         }
         "reload" => Ok(rt.reload()),
         "save" => rt.save(

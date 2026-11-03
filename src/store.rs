@@ -154,10 +154,15 @@ impl Store {
     pub fn save_ui_layout(&self, layout: &UiLayout) -> Result<()> {
         layout.validate()?;
         // Preserve malformed or future-version preferences instead of overwriting them.
-        self.ui_layout()?;
+        let existing = self.ui_layout()?;
+        let mut saved = layout.clone();
+        // Older clients only submit dimensions; keep the independently chosen view.
+        if saved.view_mode.is_none() {
+            saved.view_mode = existing.view_mode;
+        }
         atomic(
             &self.directory.join("ui-layout.json"),
-            &serde_json::to_vec_pretty(layout).map_err(|e| e.to_string())?,
+            &serde_json::to_vec_pretty(&saved).map_err(|e| e.to_string())?,
         )
     }
     pub fn load_runs(&self) -> (Vec<Run>, Vec<String>) {
@@ -211,14 +216,35 @@ mod tests {
             sidebar_width: 360,
             config_width: 520,
             output_height: 900,
+            view_mode: Some(ListView::Compact),
             ..UiLayout::default()
         };
         store.save_ui_layout(&layout).unwrap();
         drop(store);
         let store = Store::open(dir.clone()).unwrap();
         assert_eq!(store.ui_layout().unwrap(), layout);
+        store.save_ui_layout(&UiLayout::default()).unwrap();
+        assert_eq!(
+            store.ui_layout().unwrap().view_mode,
+            Some(ListView::Compact)
+        );
         assert_eq!(store.revision, revision);
         assert_eq!(fs::read(dir.join("config.json")).unwrap(), config);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn legacy_layout_loads_and_invalid_view_is_preserved() {
+        let dir = std::env::temp_dir().join(id());
+        let store = Store::open(dir.clone()).unwrap();
+        let path = dir.join("ui-layout.json");
+        let legacy = r#"{"version":1,"sidebarWidth":200,"configWidth":312,"outputHeight":240}"#;
+        fs::write(&path, legacy).unwrap();
+        assert_eq!(store.ui_layout().unwrap(), UiLayout::default());
+        let invalid = legacy.replace("240}", "240,\"viewMode\":\"unknown\"}");
+        fs::write(&path, &invalid).unwrap();
+        assert!(store.ui_layout().is_err());
+        assert!(store.save_ui_layout(&UiLayout::default()).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

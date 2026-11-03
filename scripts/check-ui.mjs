@@ -14,11 +14,11 @@ let cdp;const errors=[],passes=[]
 const shown=`el=>el.getClientRects().length>0`
 async function click(text,scope='body'){await cdp.evaluate(`(()=>{const b=[...document.querySelectorAll(${JSON.stringify(scope+' button')})].filter(${shown}).find(b=>b.textContent.trim()===${JSON.stringify(text)});if(!b)throw Error('Missing button '+${JSON.stringify(text)});b.click()})()`);await delay(80)}
 async function aria(label){await cdp.evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(`[aria-label="${label}"]`)});if(!el)throw Error('Missing control');el.focus();el.click()})()`);await delay(80)}
-async function fill(label,value,scope='.config-form'){await cdp.evaluate(`(()=>{const l=[...document.querySelectorAll(${JSON.stringify(scope+' label')})].find(l=>l.firstChild.textContent.trim()===${JSON.stringify(label)});const el=l?.querySelector('input,select,textarea');if(!el)throw Error('Missing field '+${JSON.stringify(label)});el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))})()`)}
+async function fill(label,value,scope='.config-form'){await cdp.evaluate(`(()=>{const l=[...document.querySelectorAll(${JSON.stringify(scope+' label')})].find(l=>l.firstChild.textContent.trim()===${JSON.stringify(label)});const el=l?.querySelector('input,select,textarea')||document.querySelector('[aria-label='+JSON.stringify(${JSON.stringify(label)})+']');if(!el)throw Error('Missing field '+${JSON.stringify(label)});el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))})()`)}
 const text=()=>cdp.evaluate('document.body.textContent')
 const closed=selector=>until(()=>cdp.evaluate(`!document.querySelector(${JSON.stringify(selector)})?.open`),'dialog closed')
 async function shot(name){await writeFile(path.join(root,name),Buffer.from((await cdp.command('Page.captureScreenshot',{format:'png'})).data,'base64'))}
-async function check(name,fn){await fn();passes.push(name);console.log('PASS '+name)}
+async function check(name,fn){try{await fn();passes.push(name);console.log('PASS '+name)}catch(error){await shot('failure.png');console.error('FAIL '+name+'; artifacts: '+root);throw error}}
 try{
  const port=await until(async()=>Number((await readFile(path.join(root,'profile/DevToolsActivePort'),'utf8')).split('\n')[0]),'Edge CDP')
  const target=await until(async()=>(await(await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(t=>t.type==='page'),'Edge target')
@@ -35,7 +35,27 @@ try{
   await click('＋ 添加参数','.config-form');await cdp.evaluate(`(()=>{const el=document.querySelector('[aria-label="启动参数 1"]');el.value='a b 中文';el.dispatchEvent(new Event('input',{bubbles:true}))})()`)
   await fill('备注','界面与真实执行的隔离验证');await click('保存配置','.config-form');await until(()=>cdp.evaluate(`!document.querySelector('.dirty-dot')`),'configuration saved')
   const state=await app.api('snapshot');assert.equal(state.config.scripts[0].program,process.execPath);assert.deepEqual(state.config.scripts[0].args,['a b 中文'])
-  await cdp.evaluate(`document.querySelector('.advanced').open=true`);await fill('环境变量','INVALID');assert.equal(await cdp.evaluate(`document.querySelector('[aria-label="环境变量"]').getAttribute('aria-invalid')`),'true');await click('放弃修改','.config-form');await fill('环境变量','SCRIPT_STUDIO_UI_TEST=ok');await click('保存配置','.config-form');await until(async()=>(await app.api('snapshot')).config.scripts[0].env.SCRIPT_STUDIO_UI_TEST==='ok','environment after discard')
+  await click('切换纯文本','.env-editor');await fill('环境变量','INVALID');assert.equal(await cdp.evaluate(`document.querySelector('[aria-label="环境变量"]').getAttribute('aria-invalid')`),'true');await click('放弃修改','.config-form');await fill('环境变量','SCRIPT_STUDIO_UI_TEST=ok');await click('保存配置','.config-form');await until(async()=>(await app.api('snapshot')).config.scripts[0].env.SCRIPT_STUDIO_UI_TEST==='ok','environment after discard')
+ })
+ await check('environment table/raw synchronization, validation and sticky save footer',async()=>{
+  await fill('环境变量','# preserved comment\nNAME=a=b\nEMPTY=')
+  await click('切换表格','.env-editor')
+  assert.equal(await cdp.evaluate(`document.querySelector('[aria-label="变量值 1"]').value`),'a=b')
+  await cdp.evaluate(`(()=>{const el=document.querySelector('[aria-label="变量名称 2"]');el.value='name';el.dispatchEvent(new Event('input',{bubbles:true}))})()`)
+  assert.equal(await cdp.evaluate(`document.querySelector('.config-actions .primary').disabled`),true)
+  assert.match(await cdp.evaluate(`document.querySelector('.env-editor').textContent`),/重复/)
+  await cdp.evaluate(`(()=>{const el=document.querySelector('[aria-label="变量名称 2"]');el.value='OTHER';el.dispatchEvent(new Event('input',{bubbles:true}))})()`)
+  await click('切换纯文本','.env-editor')
+  assert.equal(await cdp.evaluate(`document.querySelector('[aria-label="环境变量"]').value`),'# preserved comment\nNAME=a=b\nOTHER=')
+  await click('切换表格','.env-editor');await click('添加变量','.env-editor')
+  assert.equal(await cdp.evaluate(`document.activeElement.getAttribute('aria-label')`),'变量名称 3')
+  await aria('删除变量 3')
+  const before=await cdp.evaluate(`document.querySelector('.config-footer').getBoundingClientRect().top`)
+  await cdp.evaluate(`document.querySelector('.config-fields').scrollTop=100000`)
+  assert.equal(await cdp.evaluate(`document.querySelector('.config-footer').getBoundingClientRect().top`),before)
+  assert.equal(await cdp.evaluate(`(()=>{const b=document.querySelector('.config-actions .primary'),r=b.getBoundingClientRect();return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===b})()`),true)
+  await shot('configuration-table.png')
+  await click('放弃修改','.config-form')
  })
  await check('panel grid, drag, keyboard, viewport constraints and preference restoration',async()=>{
   await until(()=>cdp.evaluate(`document.querySelector('.resize-handle-sidebar').getAttribute('aria-disabled')==='false'`),'layout loaded')
@@ -47,8 +67,7 @@ try{
   assert.equal(boxes['.config-panel'].bottom,boxes['.script-list'].bottom)
   assert.ok(boxes['.sidebar'].right<=boxes['.script-list'].x)
   assert.ok(boxes['.script-list'].right<=boxes['.config-panel'].x)
-  assert.equal(boxes['.output-panel'].height,42,'output panel is collapsed by default')
-  await aria('展开运行输出')
+  assert.equal(boxes['.output-panel'].height,240,'output panel starts at standard height')
   const key=async(panel,key)=>{
    await cdp.evaluate(`document.querySelector('.resize-handle-${panel}').focus()`)
    await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key})
@@ -103,7 +122,7 @@ try{
   const saved=await cdp.evaluate('navigator.clipboard.readText()')
   assert.ok(saved.startsWith("& '"));assert.ok(saved.includes(file));assert.ok(saved.includes("'a b 中文'"));assert.ok(!saved.includes('\\\\'))
   await fill('名称','草稿名称');await fill('脚本文件',file.replace('fixture.mjs','draft.mjs'))
-  await click('复制命令','.advanced')
+  await click('复制命令','.launch-preview')
   assert.ok((await cdp.evaluate('navigator.clipboard.readText()')).includes('draft.mjs'))
   await aria(button);assert.equal(await cdp.evaluate('navigator.clipboard.readText()'),saved)
   await cdp.evaluate(`window.originalClipboardWrite=navigator.clipboard.writeText; navigator.clipboard.writeText=()=>Promise.reject(new Error('denied'))`)
@@ -203,14 +222,69 @@ try{
    assert.equal((await app.api('snapshot')).config.scripts[0].name,'界面任务')
   }finally{await cdp.evaluate(`window.fetch=window.terminalOriginalFetch;delete window.terminalOriginalFetch;delete window.terminalRequests`);await control('keyUp')}
  })
+ await check('split run preference survives refresh and menu supports Escape and arrow keys',async()=>{
+  await cdp.command('Page.reload');await until(()=>cdp.evaluate(`Boolean(document.querySelector('[aria-label="在外部终端运行 界面任务"]'))`),'remembered external mode')
+  await aria('界面任务 的运行方式')
+  await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowDown'})
+  assert.equal(await cdp.evaluate(`document.activeElement.textContent.trim()`),'在外部 PowerShell 终端运行')
+  await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape'})
+  assert.equal(await cdp.evaluate(`document.activeElement.getAttribute('aria-label')`),'界面任务 的运行方式')
+  assert.equal(await cdp.evaluate(`Boolean(document.querySelector('.action-menu'))`),false)
+  await aria('界面任务 的运行方式');await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab'})
+  assert.equal(await cdp.evaluate(`Boolean(document.querySelector('.action-menu'))`),false)
+  await cdp.evaluate(`window.pendingClipboard=navigator.clipboard.writeText;navigator.clipboard.writeText=()=>new Promise(resolve=>window.resolveClipboard=resolve)`)
+  await aria('复制 界面任务 的 PowerShell 命令');await aria('界面任务 的运行方式')
+  assert.equal(await cdp.evaluate(`document.activeElement.getAttribute('role')`),'menu')
+  await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape'})
+  assert.equal(await cdp.evaluate(`Boolean(document.querySelector('.action-menu'))`),false)
+  await cdp.evaluate(`window.resolveClipboard();navigator.clipboard.writeText=window.pendingClipboard;delete window.pendingClipboard;delete window.resolveClipboard`)
+ })
  let firstRun
  await check('script run, stdout/stderr, terminal state and history selection are real',async()=>{
-  await aria('运行 界面任务');firstRun=await until(async()=>(await app.api('snapshot')).runs[0]?.id,'run ID');await completed(app,firstRun);await until(()=>cdp.evaluate(`document.querySelector('.output-body').textContent.includes('ui-result:')`),'real output');assert.match(await cdp.evaluate(`document.querySelector('.output-body').textContent`),/a b 中文/);assert.match(await cdp.evaluate(`document.querySelector('.output-body').textContent`),/ui diagnostic/)
-  assert.match(await cdp.evaluate(`document.querySelector('.output-status').textContent`),/退出码 0/);assert.ok(await cdp.evaluate(`document.querySelector('[aria-label="选择运行记录"]').value`))
+  await aria('界面任务 的运行方式');await click('托管运行','.action-menu');firstRun=await until(async()=>(await app.api('snapshot')).runs[0]?.id,'run ID');await completed(app,firstRun);await until(()=>cdp.evaluate(`document.querySelector('.output-body').textContent.includes('ui-result:')`),'real output');assert.match(await cdp.evaluate(`document.querySelector('.output-body').textContent`),/a b 中文/);assert.match(await cdp.evaluate(`document.querySelector('.output-body').textContent`),/ui diagnostic/)
+  assert.match(await cdp.evaluate(`document.querySelector('.console-toolbar').textContent`),/退出码 0/);assert.ok(await cdp.evaluate(`document.querySelector('[aria-label="选择运行记录"]').getAttribute('aria-haspopup')==='menu'`))
   await aria('清空当前输出');assert.match(await cdp.evaluate(`document.querySelector('.output-body').textContent`),/当前显示已清空/);await aria('重新读取输出');await until(()=>cdp.evaluate(`document.querySelector('.output-body').textContent.includes('ui-result:')`),'reload persisted output')
   await shot('light.png')
  })
+ await check('console stream/search filtering, literal highlighting, history menu and three heights',async()=>{
+  await click('stderr','.stream-filter')
+  assert.match(await cdp.evaluate(`document.querySelector('.output-body').textContent`),/ui diagnostic/)
+  assert.doesNotMatch(await cdp.evaluate(`document.querySelector('.output-body').textContent`),/ui-result/)
+  await click('stdout','.stream-filter')
+  assert.doesNotMatch(await cdp.evaluate(`document.querySelector('.output-body').textContent`),/ui diagnostic/)
+  await cdp.evaluate(`document.activeElement.blur()`);await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key:'f',code:'KeyF',modifiers:2})
+  assert.equal(await cdp.evaluate(`document.activeElement.getAttribute('aria-label')`),'日志关键词')
+  await cdp.evaluate(`(()=>{const el=document.activeElement;el.value='中文';el.dispatchEvent(new Event('input',{bubbles:true}))})()`)
+  assert.equal(await cdp.evaluate(`document.querySelector('.output-body mark').textContent`),'中文')
+  await aria('使用说明');await until(()=>cdp.evaluate(`document.querySelector('.help-dialog').open`),'help during log search');await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await closed('.help-dialog');assert.equal(await cdp.evaluate(`Boolean(document.querySelector('[aria-label="日志关键词"]'))`),true,'dialog Escape must not close underlying log search')
+  await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape'})
+  await cdp.command('Input.dispatchKeyEvent',{type:'keyUp',key:'Control',modifiers:0})
+  await click('全部','.stream-filter')
+  await aria('最大化运行输出')
+  assert.equal(await cdp.evaluate(`(()=>{const r=document.querySelector('.output-panel').getBoundingClientRect();return r.top===64&&r.bottom===innerHeight&&r.left===document.querySelector('.sidebar').getBoundingClientRect().right})()`),true)
+  assert.equal(await cdp.evaluate(`document.querySelector('.script-list').inert`),true)
+  await shot('console-maximized.png')
+  await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape'})
+  assert.equal(await cdp.evaluate(`document.querySelector('.output-panel').getBoundingClientRect().height`),240)
+  await aria('收起运行输出');assert.equal(await cdp.evaluate(`document.querySelector('.output-panel').getBoundingClientRect().height`),42)
+  await aria('标准输出高度')
+  await aria('选择运行记录');assert.ok(await cdp.evaluate(`document.querySelector('.action-menu').textContent.includes('界面任务')`))
+  await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape'})
+ })
  const slow=script(slowFile,'持续任务');await save(app,c=>c.scripts.push(slow));await until(()=>cdp.evaluate(`document.querySelectorAll('.script-card').length===2`),'new script')
+ await check('compact rows, keyboard navigation, view persistence and independent run modes',async()=>{
+  await aria('紧凑列表视图')
+  assert.equal(await cdp.evaluate(`document.querySelector('.script-card').getBoundingClientRect().height`),40)
+  await cdp.evaluate(`document.querySelector('.card-select').focus()`)
+  await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowDown'})
+  assert.match(await cdp.evaluate(`document.activeElement.textContent`),/持续任务/)
+  assert.equal(await cdp.evaluate(`Boolean(document.querySelector('[aria-label="运行 持续任务"]'))`),true)
+  await shot('compact-light.png')
+  await cdp.command('Page.reload');await until(()=>cdp.evaluate(`Boolean(document.querySelector('.cards.compact .script-card'))`),'compact restored')
+  await cdp.command('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'dark'}]});await delay(200);await shot('compact-dark.png')
+  await cdp.command('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'light'}]})
+  await aria('卡片视图')
+ })
  await check('unsaved draft selection requires a deliberate discard',async()=>{
   await fill('名称','未保存的名称');await cdp.evaluate(`[...document.querySelectorAll('.card-select')].find(b=>b.textContent.includes('持续任务')).click()`);await until(()=>cdp.evaluate(`document.querySelector('.confirm-dialog').open`),'discard confirmation');await click('取消','.confirm-dialog');assert.equal(await cdp.evaluate(`document.querySelector('.config-form input').value`),'未保存的名称')
   await cdp.evaluate(`[...document.querySelectorAll('.card-select')].find(b=>b.textContent.includes('持续任务')).click()`);await click('确认','.confirm-dialog');await until(()=>cdp.evaluate(`document.querySelector('.config-form input').value==='持续任务'`),'new selection')
@@ -218,13 +292,13 @@ try{
  let slowRun
  await check('page reload preserves authenticated session and keeps background task running',async()=>{
   await aria('运行 持续任务');slowRun=await until(async()=>(await app.api('snapshot')).runs.find(r=>r.scriptId===slow.id)?.id,'long run')
-  await cdp.command('Page.reload');await until(async()=>(await text()).includes('1 个运行中'),'reconnected UI');assert.equal((await app.api('snapshot')).runs.find(r=>r.id===slowRun).state,'running');assert.equal(await cdp.evaluate(`location.hash`),'')
+  const clockBefore=await cdp.evaluate(`document.querySelector('.running-clock').textContent`);await until(async()=>(await cdp.evaluate(`document.querySelector('.running-clock').textContent`))!==clockBefore,'live elapsed timer',4000);await cdp.command('Page.reload');await until(async()=>(await text()).includes('1 个运行中'),'reconnected UI');assert.equal((await app.api('snapshot')).runs.find(r=>r.id===slowRun).state,'running');assert.equal(await cdp.evaluate(`location.hash`),'')
  })
  await check('light/dark and narrow drawer fit the viewport without page overflow',async()=>{
   for(const [width,height,theme,name] of [[1180,840,'light','light-populated.png'],[860,720,'dark','dark.png'],[480,780,'dark','dark-narrow.png']]){
    await cdp.command('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});await cdp.command('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme}]});await delay(120)
    assert.equal(await cdp.evaluate(`document.documentElement.scrollWidth<=innerWidth`),true,`overflow ${width}`);assert.equal(await cdp.evaluate(`getComputedStyle(document.documentElement).colorScheme`),theme);await shot(name)
-   if(width===480){await aria('复制 界面任务 的 PowerShell 命令');assert.equal(await cdp.evaluate(`(()=>{const r=document.querySelector('.toast-success').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()`),true);await shot('toast-dark-narrow.png');await aria('关闭提示')}
+   if(width===480){await aria('更多输出操作');assert.equal(await cdp.evaluate(`document.querySelectorAll('.action-menu button').length`),3);await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape'});await aria('紧凑列表视图');assert.equal(await cdp.evaluate(`document.documentElement.scrollWidth<=innerWidth`),true);await shot('compact-mobile.png');await aria('卡片视图');await aria('复制 界面任务 的 PowerShell 命令');assert.equal(await cdp.evaluate(`(()=>{const r=document.querySelector('.toast-success').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()`),true);await shot('toast-dark-narrow.png');await aria('关闭提示')}
    if(width<980){await click('脚本配置');assert.equal(await cdp.evaluate(`document.querySelector('.config-panel').getBoundingClientRect().right<=innerWidth`),true);assert.equal(await cdp.evaluate(`Boolean(document.activeElement.closest('.config-form'))`),true);await shot(`drawer-${width}.png`);if(width===860){await cdp.command('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await until(()=>cdp.evaluate(`!document.querySelector('.config-panel').classList.contains('open')`),'Escape closes drawer');assert.equal(await cdp.evaluate(`document.activeElement.classList.contains('floating-config')`),true)}else await aria('关闭脚本配置')}
   }
   await cdp.command('Emulation.setDeviceMetricsOverride',{width:1180,height:840,deviceScaleFactor:1,mobile:false})
@@ -235,11 +309,11 @@ try{
   await aria('关闭配置错误提示');await delay(650)
   assert.equal(await cdp.evaluate(`Boolean(document.querySelector('.toast-error .toast-action'))`),false,'unchanged configuration error stays dismissed during polling')
   assert.equal(await cdp.evaluate(`document.querySelector('.add-button').disabled`),true);await aria('设置');await click('停止','.dialog[open]');assert.equal((await completed(app,slowRun)).state,'stopped')
-  await cdp.evaluate(`[...document.querySelectorAll('.recent-runs .active-run')].find(el=>el.textContent.includes('界面任务')).querySelector('button').click()`);await until(()=>cdp.evaluate(`document.querySelector('.output-body').textContent.includes('ui-result:')`),'historical output')
+  await cdp.evaluate(`[...document.querySelectorAll('.recent-runs .active-run')].find(el=>el.textContent.includes('持续任务')).querySelector('button').click()`);await until(()=>cdp.evaluate(`document.querySelector('.output-body').textContent.includes('ui-running')`),'historical output')
   await writeFile(path.join(data,'config.json'),JSON.stringify(saved));await app.api('reload');await until(()=>cdp.evaluate(`!document.querySelector('.add-button').disabled`),'config restored')
  })
  await check('remove metadata preserves file and deleted script history remains accessible',async()=>{
-  await cdp.evaluate(`[...document.querySelectorAll('.card-select')].find(b=>b.textContent.includes('界面任务')).click()`);await click('移除登记','.config-form');await click('确认','.confirm-dialog');await until(async()=>(await app.api('snapshot')).config.scripts.length===1,'removed registration');assert.match(await readFile(file,'utf8'),/ui-result/)
+  await aria('运行 界面任务');firstRun=await until(async()=>{const r=(await app.api('snapshot')).runs.find(r=>r.scriptId!==slow.id);return r?.state==='succeeded'&&r.id},'fresh retained history');await cdp.evaluate(`[...document.querySelectorAll('.card-select')].find(b=>b.textContent.includes('界面任务')).click()`);await until(()=>cdp.evaluate(`!document.querySelector('.remove-registration').disabled`),'remove enabled after completion');await click('移除登记','.config-form');await click('确认','.confirm-dialog');await until(async()=>(await app.api('snapshot')).config.scripts.length===1,'removed registration');assert.match(await readFile(file,'utf8'),/ui-result/)
   await aria('设置');await cdp.evaluate(`[...document.querySelectorAll('.recent-runs .active-run')].find(el=>el.textContent.includes('界面任务')).querySelector('button').click()`);await until(()=>cdp.evaluate(`document.querySelector('.output-body').textContent.includes('ui-result:')`),'removed script history');assert.equal((await app.api('snapshot')).runs.find(r=>r.id===firstRun).state,'succeeded')
  })
  await check('completed scripts without output show a final empty state',async()=>{

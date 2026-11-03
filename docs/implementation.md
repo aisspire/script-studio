@@ -60,3 +60,11 @@ stdin EOF 独立触发清理，正在执行的业务动作不阻止退出请求�
 ## 构建和检查
 
 精确依赖版本沿用既有工作区技术版本，独立维护 Cargo.lock 和 package-lock.json。build.ps1 默认 Release，提供 DebugBuild、Offline、SkipFrontend；生成完整相对路径目录包。验证入口和实际结果见 README.md 与 verification.md。
+
+## 前端交互状态（2026-11-03）
+
+新增 `EnvEditor`、`SplitRunButton`、`ActionMenu` 组件及 `studioState` 纯逻辑模块；不修改 Rust 类型、HTTP 动作、stdio 消息、配置版本或布局文件结构。环境变量表格与纯文本共享一份文本草稿，合法时更新待保存的 env 对象；无效时阻止保存，放弃恢复原值。命令预览继续使用 `powershellCommand`，不把 cwd／env 注入粘贴命令。
+
+`script-studio:view` 和 `script-studio:run-modes` 为当前来源 localStorage 中的展示／运行偏好。读取校验、写入异常均有回退，不阻止核心操作；运行偏好仅在成功的启动响应后写入，按稳定脚本 ID 区分。不写入 Oriel 配置或插件业务配置，跨随机端口恢复不在该存储方案保证内。
+
+控制台最大化为前端覆盖状态，不持久化为拖拽高度；覆盖的脚本／配置区域使用 inert 避免键盘进入不可见内容。菜单 Teleport 到页面顶层以避免被滚动容器裁切，支持方向键、Home／End、Esc、Tab 与焦点归还。日志按流重建行后应用字面、大小写不敏感的过滤和 Vue 文本高亮，不使用 HTML 注入；复制输出应用当前过滤条件，清空／重读保留后端历史语义。计时器独立每秒更新并在卸载时清理。

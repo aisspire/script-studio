@@ -1,6 +1,8 @@
 <script setup lang="ts">
 withDefaults(defineProps<{ name: string; size?: number }>(), { size: 18 })
 const paths: Record<string, string> = {
+  more: 'M5 12h.01 M12 12h.01 M19 12h.01',
+  list: 'M8 6h13 M8 12h13 M8 18h13 M3 6h.01 M3 12h.01 M3 18h.01', minimize: 'M5 12h14', panel: 'M3 4h18v16H3z M3 12h18', maximize: 'M8 3H3v5 M16 3h5v5 M3 16v5h5 M21 16v5h-5',
   terminal: 'm5 7 5 5-5 5 M13 17h6', grid: 'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
   search: 'm21 21-5-5 M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0', plus: 'M12 5v14 M5 12h14',
   folder: 'M3 7V5h7l2 3h9v12H3z', clock: 'M12 8v5l3 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',

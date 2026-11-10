@@ -6,7 +6,7 @@ import SplitRunButton from './SplitRunButton.vue'
 import EnvEditor from './EnvEditor.vue'
 import { highlight, logLines, parseEnvironment, runSession, readPreference, writePreference, type RunMode } from './studioState'
 import ToastNotifications from './ToastNotifications.vue'
-import { powershellCommand } from './command'
+import { effectiveRunner, powershellCommand, runnerArguments } from './command'
 import { usePanelLayout } from './usePanelLayout'
 import { active, api, fileType, freshScript, runners, states, type Chunk, type Config, type Group, type Logs, type Run, type Script, type Snapshot } from './api'
 
@@ -77,6 +77,18 @@ const running = computed(() => data.value?.runs.filter(active) || [])
 const types = computed(() => [...new Set(scripts.value.map(fileType))])
 const currentActive = computed(() => data.value?.runs.find(r => r.scriptId === selected.value && active(r)))
 const preview = computed(() => draft.value ? powershellCommand(draft.value) : '')
+const editableRunner = computed(() => !!draft.value && ['powershell', 'python', 'node', 'custom'].includes(effectiveRunner(draft.value) || ''))
+const interpreterArguments = computed(() => draft.value ? runnerArguments(draft.value) : [])
+function editInterpreterArguments(change: (args: string[]) => void) {
+  if (!draft.value) return
+  const args = [...runnerArguments(draft.value)]
+  change(args)
+  if (draft.value.runner === 'custom') draft.value.interpreterArgs = args
+  else draft.value.runnerArgs = args
+}
+function resetInterpreterArguments() {
+  if (draft.value) delete draft.value.runnerArgs
+}
 const duration = (r: Run) => `${Math.max(0, Math.floor(((r.endedAt ?? now.value) - r.startedAt) / 1000))} 秒`
 const elapsed = (r: Run) => { const seconds = Math.max(0, Math.floor(((r.endedAt ?? now.value) - r.startedAt) / 1000)); return `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}` }
 const date = (value: number) => new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -211,7 +223,11 @@ function openHelp() { void perform(async () => { const response = await fetch('/
 function shutdown() { confirm(`退出后台并停止全部 ${running.value.length} 个托管任务？连接到同一实例的其他页面也会断开。`, () => void perform(async () => {
   await api('shutdown'); exited.value = true; settingsDialog.value?.close(); clearTimeout(timer); notice.value = '后台已退出，可以关闭此页面。'
 })) }
-function updateArg(index: number, event: Event, interpreter = false) { const values = interpreter ? draft.value!.interpreterArgs : draft.value!.args; values[index] = (event.target as HTMLInputElement).value }
+function updateArg(index: number, event: Event, interpreter = false) {
+  const value = (event.target as HTMLInputElement).value
+  if (interpreter) editInterpreterArguments(args => { args[index] = value })
+  else draft.value!.args[index] = value
+}
 function setEnv(text: string) {
   envText.value = text
   const result = parseEnvironment(text)
@@ -294,9 +310,15 @@ onBeforeUnmount(() => {
           <div class="config-fields"><fieldset :disabled="!writable || busy">
             <label>名称<input v-model="draft.name" required maxlength="80" /></label>
             <label>脚本文件<div class="input-action"><input v-model="draft.path" required placeholder="本地文件绝对路径" /><button type="button" class="icon-button" aria-label="选择脚本文件" @click="pickFile(draft)"><UiIcon name="folder" :size="16" /></button></div></label>
-            <div class="field-row"><label>分组<select v-model="draft.groupId"><option :value="null">未分组</option><option v-for="group in data?.config.groups" :key="group.id" :value="group.id">{{ group.name }}</option></select></label><label>启动方式<select v-model="draft.runner"><option v-for="(label, value) in runners" :key="value" :value="value">{{ label }}</option></select></label></div>
-            <template v-if="draft.runner === 'custom'"><label>解释器<input v-model="draft.program" required placeholder="例如 pwsh.exe 或完整路径" /></label><div class="argument-field"><div class="field-title">解释器参数<button type="button" @click="draft.interpreterArgs.push('')">＋ 添加</button></div><div v-for="(arg, i) in draft.interpreterArgs" :key="i" class="input-action"><input :value="arg" :aria-label="`解释器参数 ${i + 1}`" @input="updateArg(i, $event, true)" /><button type="button" class="icon-button" :aria-label="`移除解释器参数 ${i + 1}`" @click="draft.interpreterArgs.splice(i, 1)"><UiIcon name="close" :size="14" /></button></div></div></template>
-            <div class="argument-field"><div class="field-title">启动参数<button type="button" @click="draft.args.push('')">＋ 添加参数</button></div><div v-if="!draft.args.length" class="field-hint">每项单独传递，空格无需加引号。</div><div v-for="(arg, i) in draft.args" :key="i" class="input-action"><input :value="arg" :aria-label="`启动参数 ${i + 1}`" placeholder="空白表示一个空参数" @input="updateArg(i, $event)" /><button type="button" class="icon-button" :aria-label="`移除启动参数 ${i + 1}`" @click="draft.args.splice(i, 1)"><UiIcon name="close" :size="14" /></button></div></div>
+            <div class="field-row"><label>分组<select v-model="draft.groupId"><option :value="null">未分组</option><option v-for="group in data?.config.groups" :key="group.id" :value="group.id">{{ group.name }}</option></select></label><label>启动方式<select v-model="draft.runner" @change="resetInterpreterArguments"><option v-for="(label, value) in runners" :key="value" :value="value">{{ label }}</option></select></label></div>
+            <label v-if="draft.runner === 'custom'">解释器<input v-model="draft.program" required placeholder="例如 pwsh.exe 或完整路径" /></label>
+            <div v-if="editableRunner" class="argument-field">
+              <div class="field-title">启动参数（解释器）<button type="button" @click="editInterpreterArguments(args => args.push(''))">＋ 添加</button></div>
+              <div v-for="(arg, i) in interpreterArguments" :key="i" class="input-action"><input :value="arg" :aria-label="`解释器参数 ${i + 1}`" @input="updateArg(i, $event, true)" /><button type="button" class="icon-button" :aria-label="`移除解释器参数 ${i + 1}`" @click="editInterpreterArguments(args => args.splice(i, 1))"><UiIcon name="close" :size="14" /></button></div>
+              <p class="field-hint">位于脚本路径前，可修改或删除，保存后生效。</p>
+              <button v-if="draft.runner !== 'custom'" type="button" @click="resetInterpreterArguments">恢复默认参数</button>
+            </div>
+            <div class="argument-field"><div class="field-title">脚本参数<button type="button" @click="draft.args.push('')">＋ 添加参数</button></div><div v-if="!draft.args.length" class="field-hint">每项单独传递，空格无需加引号。</div><div v-for="(arg, i) in draft.args" :key="i" class="input-action"><input :value="arg" :aria-label="`启动参数 ${i + 1}`" placeholder="空白表示一个空参数" @input="updateArg(i, $event)" /><button type="button" class="icon-button" :aria-label="`移除启动参数 ${i + 1}`" @click="draft.args.splice(i, 1)"><UiIcon name="close" :size="14" /></button></div></div>
             <section class="launch-preview"><div class="field-title">启动预览（PowerShell）<button type="button" :disabled="busy || !preview || !!envError" @click="copyCommand(draft)"><UiIcon name="copy" :size="13" />复制命令</button></div><code class="command-preview">{{ preview || '请检查脚本路径、启动方式及参数。' }}</code><p class="field-hint">工作目录和环境变量沿用粘贴目标终端。</p></section>
             <label>工作目录<input :value="draft.cwd || ''" placeholder="默认使用脚本所在目录" @input="draft.cwd = ($event.target as HTMLInputElement).value || null" /></label>
             <label>备注<textarea v-model="draft.description" rows="2" maxlength="2000" placeholder="这个脚本做什么…" /></label>

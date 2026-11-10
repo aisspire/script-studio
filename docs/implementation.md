@@ -6,7 +6,9 @@
 
 配置版本 1 包含 groups 与 scripts。分组与脚本采用 UUID，身份与名称分离。保存先验证引用、字段及数量，再核对原文件内容的 SHA-256 revision，原子替换后更新内存。文件最大 2 MiB；无法读取、未知版本或配置损坏时保留原文件并阻止保存和新运行，已有任务仍可停止。
 
-脚本字段：id、name、description、path、groupId、favorite、runner、program、interpreterArgs、args、cwd、env、encoding。path/cwd 使用绝对路径；cwd 空值取脚本父目录。自定义解释器命令为 program、interpreterArgs、path、args。解释器是否存在及脚本是否可执行在运行时检查。
+脚本字段：id、name、description、path、groupId、favorite、runner、program、interpreterArgs、runnerArgs、args、cwd、env、encoding。path/cwd 使用绝对路径；cwd 空值取脚本父目录。自定义解释器命令为 program、interpreterArgs、path、args。解释器是否存在及脚本是否可执行在运行时检查。
+
+可选 `runnerArgs` 覆盖 PowerShell、Python、Node.js 的解释器参数，含自动识别对应类型；省略或 null 使用原默认值，空数组明确表示全部删除。参数在脚本路径前，`args` 仍在路径后；自定义解释器继续使用 `interpreterArgs`，CMD／直接执行不使用该覆盖字段。覆盖参数最多 128 项，沿用现有参数字符校验。旧配置读取不改写，用户编辑保存时才写入覆盖。配置版本仍为 1；旧后台会拒绝未知字段，因此更新时需同时替换后台和前端。托管运行、外部终端和命令预览遵循相同参数顺序。
 
 面板偏好单独保存在数据目录 `ui-layout.json`，版本 1 包含 `sidebarWidth`（160–360）、`configWidth`（260–520）和 `outputHeight`（110–4096），单位为 CSS 像素；可选 `viewMode` 为 cards／compact。缺少文件时使用 200／312／240 默认值；读写校验版本、完整字段和尺寸范围，原子保存，多个页面以最后成功保存为准。不修改 `config.json` 及其 revision，不依赖随后台端口改变的浏览器 localStorage。损坏、超出 4 KiB 或版本不支持时保留文件，界面回退默认尺寸并提示错误，后续保存也拒绝覆盖该文件；不阻止读取脚本配置或管理已有任务。
 

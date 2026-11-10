@@ -1,5 +1,13 @@
 # 本轮验证
 
+
+## 2026-11-10：默认解释器参数可编辑
+
+- WSL `cargo test --locked --offline`：14 项通过，新增默认参数兼容、覆盖序列化重载、显式空列表和自定义解释器隔离检查。
+- WSL `cargo clippy --locked --offline --all-targets -- -D warnings` 通过。
+- 使用原 package-lock.json 在临时目录执行 `npm ci --offline --include=optional --no-audit --no-fund`、`npm run build`、`npm run test:ui-state` 通过；新增删除 NonInteractive、空列表、默认回退和复制命令参数顺序检查。
+- 未运行用户真实脚本，未更改工作区依赖或 lockfile；未完成本轮 Windows 原生构建、Edge 界面验收或安装目录更新。部署需同步更新后台与网页资源。
+
 ## 2026-11-03：紧凑视图跨重启保存
 
 - 卡片／紧凑视图与面板尺寸共同保存到工具数据目录的 `ui-layout.json`，不再受后台随机端口影响。兼容旧尺寸文件及请求，仅在文件未设置视图时迁移当前来源可读取的旧偏好；旧客户端保存尺寸不会清除已存视图，脚本配置修订号保持不变。

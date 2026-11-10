@@ -3,6 +3,7 @@ export interface Group { id: string; name: string }
 export interface Script {
   id: string; name: string; description: string; path: string; groupId: string | null; favorite: boolean
   runner: Runner; program: string; interpreterArgs: string[]; args: string[]; cwd: string | null
+  runnerArgs?: string[] | null
   env: Record<string, string>; encoding: 'utf8' | 'system'
 }
 export interface Config { version: number; groups: Group[]; scripts: Script[] }

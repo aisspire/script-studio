@@ -4,15 +4,27 @@ const literal = (value: string) => `'${value.replaceAll("'", "''")}'`
 // Quote the Windows native command line, including empty arguments and trailing slashes.
 const nativeArgument = (value: string) => `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`
 
-export function powershellCommand(script: Script): string {
-  if (!script.path.trim()) return ''
+export function effectiveRunner(script: Script): string | undefined {
   const ext = script.path.split('.').at(-1)?.toLowerCase() || ''
-  const runner = script.runner === 'auto'
+  return script.runner === 'auto'
     ? ({ ps1: 'powershell', cmd: 'cmd', bat: 'cmd', py: 'python', js: 'node', cjs: 'node', mjs: 'node', exe: 'direct' } as Record<string, string>)[ext]
     : script.runner
+}
+
+export function runnerArguments(script: Script): string[] {
+  const runner = effectiveRunner(script)
+  if (runner === 'custom') return script.interpreterArgs
+  if (script.runnerArgs != null) return script.runnerArgs
+  if (runner === 'powershell') return ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File']
+  return runner === 'python' ? ['-u'] : []
+}
+
+export function powershellCommand(script: Script): string {
+  if (!script.path.trim()) return ''
+  const runner = effectiveRunner(script)
   const prefixes: Record<string, string[]> = {
-    powershell: ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File'],
-    python: ['python', '-u'], node: ['node'], direct: [],
+    powershell: ['powershell.exe', ...runnerArguments(script)],
+    python: ['python', ...runnerArguments(script)], node: ['node', ...runnerArguments(script)], direct: [],
   }
   if (!runner || runner === 'custom' && !script.program.trim()) return ''
   if (runner === 'cmd') {

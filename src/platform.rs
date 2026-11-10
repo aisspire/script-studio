@@ -70,9 +70,15 @@ pub fn launch(s: &Script) -> Result<Launch> {
             args.push(path.clone());
             (s.program.clone(), args)
         }
-        Runner::Cmd => (path, vec![]),
+        Runner::Cmd => (path.clone(), vec![]),
         Runner::Auto => unreachable!(),
     };
+    if matches!(runner, Runner::Powershell | Runner::Python | Runner::Node) {
+        if let Some(overrides) = &s.runner_args {
+            args = overrides.clone();
+            args.push(path.clone());
+        }
+    }
     args.extend(s.args.iter().cloned());
     let mut launch = Launch {
         program,
@@ -480,6 +486,46 @@ pub fn exit_code(status: Option<ExitStatus>) -> Option<i32> {
 mod tests {
     use super::*;
     #[test]
+    fn builtin_arguments_preserve_defaults_and_persist_explicit_overrides() {
+        let old = serde_json::json!({
+            "id": id(), "name": "fixture", "path": std::env::current_exe().unwrap(),
+            "runner": "powershell", "args": ["script argument"]
+        });
+        let mut script: Script = serde_json::from_value(old).unwrap();
+        assert!(launch(&script)
+            .unwrap()
+            .args
+            .contains(&"-NonInteractive".into()));
+        script.runner_args = Some(vec!["-NoProfile".into(), "-File".into()]);
+        let saved = serde_json::to_vec(&script).unwrap();
+        let restored: Script = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(
+            launch(&restored).unwrap().args,
+            vec![
+                "-NoProfile".to_string(),
+                "-File".to_string(),
+                script.path.to_string_lossy().into_owned(),
+                "script argument".into()
+            ]
+        );
+        script.runner_args = Some(vec![]);
+        let restored: Script =
+            serde_json::from_slice(&serde_json::to_vec(&script).unwrap()).unwrap();
+        assert_eq!(launch(&restored).unwrap().args.len(), 2);
+        script.runner = Runner::Python;
+        script.runner_args = None;
+        assert_eq!(launch(&script).unwrap().args[0], "-u");
+        script.runner_args = Some(vec!["-B".into()]);
+        assert_eq!(launch(&script).unwrap().args[0], "-B");
+        script.runner = Runner::Node;
+        assert_eq!(launch(&script).unwrap().args[0], "-B");
+        script.runner = Runner::Custom;
+        script.program = "custom".into();
+        script.interpreter_args = vec!["custom argument".into()];
+        assert_eq!(launch(&script).unwrap().args[0], "custom argument");
+    }
+
+    #[test]
     fn native_argv_escapes_empty_quotes_and_trailing_backslashes() {
         for (input, expected) in [
             ("", "\"\""),
@@ -505,6 +551,7 @@ mod tests {
             runner: Runner::Cmd,
             program: String::new(),
             interpreter_args: vec![],
+            runner_args: None,
             args: vec!["%PATH% & ! (literal)".into(), "".into()],
             cwd: None,
             env: BTreeMap::new(),

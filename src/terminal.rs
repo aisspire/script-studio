@@ -200,6 +200,7 @@ mod tests {
             runner: Runner::Direct,
             program: String::new(),
             interpreter_args: vec![],
+            runner_args: None,
             args: vec![],
             cwd: None,
             env: Default::default(),

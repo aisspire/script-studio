@@ -27,3 +27,16 @@ assert.deepEqual(runSession('first', [...past, { id: 'live', state: 'succeeded' 
 assert.ok(runSession('second', [...past, { id: 'live', state: 'stopped' }], initial).historicalRunIds.includes('live'))
 assert.deepEqual(runSession('first', past, { instance: 'first', historicalRunIds: [123] }).historicalRunIds, initial.historicalRunIds)
 console.log('PASS session baseline, page reload continuity, restart reset and invalid storage fallback')
+
+const commandSource = await readFile(new URL('../ui/command.ts', import.meta.url), 'utf8')
+const commandCompiled = ts.transpileModule(commandSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText
+const { powershellCommand, runnerArguments } = await import(`data:text/javascript;base64,${Buffer.from(commandCompiled).toString('base64')}`)
+const ps = { path: 'C:\\scripts\\example.ps1', runner: 'auto', args: ['script argument'], interpreterArgs: [] }
+assert.ok(runnerArguments(ps).includes('-NonInteractive'))
+const edited = { ...ps, runnerArgs: runnerArguments(ps).filter(arg => arg !== '-NonInteractive') }
+assert.equal(powershellCommand(JSON.parse(JSON.stringify(edited))), "& 'powershell.exe' '-NoProfile' '-ExecutionPolicy' 'Bypass' '-File' 'C:\\scripts\\example.ps1' 'script argument'")
+assert.equal(powershellCommand({ ...ps, runnerArgs: [] }), "& 'powershell.exe' 'C:\\scripts\\example.ps1' 'script argument'")
+assert.ok(powershellCommand({ ...ps, runnerArgs: null }).includes('-NonInteractive'))
+assert.equal(powershellCommand({ ...ps, runner: 'python', runnerArgs: ['-B'] }), "& 'python' '-B' 'C:\\scripts\\example.ps1' 'script argument'")
+assert.equal(powershellCommand({ ...ps, runner: 'custom', program: 'pwsh', interpreterArgs: ['-File'], runnerArgs: ['ignored'] }), "& 'pwsh' '-File' 'C:\\scripts\\example.ps1' 'script argument'")
+console.log('PASS default interpreter arguments, persisted edits, empty overrides and custom interpreter compatibility')

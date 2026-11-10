@@ -100,6 +100,8 @@ pub struct Script {
     pub program: String,
     #[serde(default)]
     pub interpreter_args: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner_args: Option<Vec<String>>,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
@@ -169,6 +171,9 @@ impl Config {
                 || !clean(&s.program)
                 || s.args.len() > 128
                 || s.interpreter_args.len() > 128
+                || s.runner_args
+                    .as_ref()
+                    .is_some_and(|args| args.len() > 128 || args.iter().any(|a| !clean(a)))
                 || s.args.iter().chain(&s.interpreter_args).any(|a| !clean(a))
             {
                 return Err("备注、解释器或参数超出限制。".into());
